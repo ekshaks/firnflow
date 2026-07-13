@@ -67,6 +67,30 @@ async fn local_service() -> (NamespaceService, NamespaceId, TempDir, TempDir) {
     (service, ns, dir, cache_dir)
 }
 
+/// A filtered query whose predicate is the caller's fault must map to
+/// `InvalidRequest` (400), not `Backend` (500). Covers the three predicate
+/// failure shapes: a SQL syntax error, an unknown column, and a type
+/// mismatch. Backend failures on a filtered query still map to `Backend`;
+/// that path is not reachable from local storage, so it is covered by the
+/// classifier's default arm rather than a test here.
+#[tokio::test]
+async fn filtered_predicate_errors_map_to_invalid_request() {
+    let (service, ns, _dir, _cache_dir) = local_service().await;
+    for bad in ["id =", "nope > 1", "text > 1"] {
+        let req = request(Some(bad));
+        let err = service
+            .query_with_cache_source(&ns, &req)
+            .await
+            .expect_err("malformed predicate should error");
+        match err {
+            FirnflowError::InvalidRequest(msg) => {
+                assert!(msg.contains("filter"), "predicate {bad:?}: {msg}")
+            }
+            other => panic!("predicate {bad:?}: expected InvalidRequest, got {other:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn filtered_and_unfiltered_queries_cache_independently() {
     let (service, ns, _dir, _cache_dir) = local_service().await;

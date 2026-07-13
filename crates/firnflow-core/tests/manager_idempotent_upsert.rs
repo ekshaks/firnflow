@@ -277,6 +277,7 @@ async fn multivector_reupsert_replaces_not_appends() {
             10,
             None,
             None,
+            None,
             true,
         )
         .await

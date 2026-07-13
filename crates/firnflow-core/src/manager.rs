@@ -1143,7 +1143,7 @@ impl NamespaceManager {
             }
             vq.execute().await.map_err(|e| {
                 if filter.is_some() {
-                    FirnflowError::InvalidRequest(format!("query filter: {e}"))
+                    classify_filter_error(e)
                 } else {
                     FirnflowError::Backend(format!("query.execute: {e}"))
                 }
@@ -1163,7 +1163,7 @@ impl NamespaceManager {
             }
             q.execute().await.map_err(|e| {
                 if filter.is_some() {
-                    FirnflowError::InvalidRequest(format!("query filter: {e}"))
+                    classify_filter_error(e)
                 } else {
                     FirnflowError::Backend(format!("fts.execute: {e}"))
                 }
@@ -1848,6 +1848,35 @@ fn map_import_lance_error(e: lancedb::Error) -> FirnflowError {
             FirnflowError::InvalidRequest(format!("import: malformed Arrow data: {e}"))
         }
         other => FirnflowError::Backend(format!("table.add: {other}")),
+    }
+}
+
+/// Map a lancedb error from a *filtered* query into a caller-facing error.
+///
+/// A bad `filter` predicate is the caller's fault and surfaces as
+/// [`FirnflowError::InvalidRequest`] (400); a storage or runtime failure on
+/// the same query stays [`FirnflowError::Backend`] (500), so an S3 timeout is
+/// not misreported as a bad predicate. A malformed, unknown-column, or
+/// mistyped predicate reaches us as `lancedb::Error::Lance` wrapping
+/// `lance::Error::InvalidInput` (SQL parse or type resolution) or
+/// `lance::Error::Schema` (unknown column); object-store and IO failures wrap
+/// a different inner variant. Anything not recognised as a predicate problem
+/// maps to `Backend`. The predicate is parsed and planned inside `execute()`,
+/// so filtered-query errors surface there rather than during the scan. The
+/// inner-error shape can shift across Lance minors, so this classification is
+/// locked by the filter tests in `service_query_filter.rs`.
+fn classify_filter_error(e: lancedb::Error) -> FirnflowError {
+    let predicate_error = matches!(
+        &e,
+        lancedb::Error::Lance {
+            source: lance::Error::InvalidInput { .. } | lance::Error::Schema { .. },
+        } | lancedb::Error::InvalidInput { .. }
+            | lancedb::Error::Schema { .. }
+    );
+    if predicate_error {
+        FirnflowError::InvalidRequest(format!("query filter: {e}"))
+    } else {
+        FirnflowError::Backend(format!("filtered query: {e}"))
     }
 }
 
