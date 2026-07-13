@@ -45,7 +45,7 @@ use arrow_array::{
 };
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef, TimeUnit};
 use dashmap::DashMap;
-use futures::{StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use lance::dataset::scanner::ColumnOrdering;
 use lance::dataset::{WriteMode, WriteParams};
 use lancedb::index::scalar::{BTreeIndexBuilder, FtsIndexBuilder, FullTextSearchQuery};
@@ -982,6 +982,11 @@ impl NamespaceManager {
     /// `ingested_at_micros` but `vector: None`. The query vector is
     /// still used for search; only the response materialisation
     /// changes.
+    ///
+    /// `filter` is a DataFusion SQL predicate applied through
+    /// LanceDB's prefilter (`only_if`) before vector ranking or FTS
+    /// scoring. Malformed predicates are reported as
+    /// [`FirnflowError::InvalidRequest`].
     #[allow(clippy::too_many_arguments)]
     pub async fn query(
         &self,
@@ -991,6 +996,7 @@ impl NamespaceManager {
         k: usize,
         nprobes: Option<usize>,
         text: Option<String>,
+        filter: Option<String>,
         include_vector: bool,
     ) -> Result<QueryResultSet, FirnflowError> {
         let info = match self.resolve_schema_info(ns).await? {
@@ -1129,12 +1135,13 @@ impl NamespaceManager {
             if let Some(ref t) = text {
                 vq = vq.full_text_search(FullTextSearchQuery::new(t.clone()));
             }
+            if let Some(ref f) = filter {
+                vq = vq.only_if(f.clone());
+            }
             if let Some(ref cols) = projection {
                 vq = vq.select(Select::columns(cols));
             }
-            vq.execute()
-                .await
-                .map_err(|e| FirnflowError::Backend(format!("query.execute: {e}")))?
+            execute_query(vq.execute(), filter.is_some(), "query.execute").await?
         } else {
             // FTS-only
             let t = text.unwrap();
@@ -1142,12 +1149,13 @@ impl NamespaceManager {
                 .query()
                 .full_text_search(FullTextSearchQuery::new(t))
                 .limit(k);
+            if let Some(ref f) = filter {
+                q = q.only_if(f.clone());
+            }
             if let Some(ref cols) = projection {
                 q = q.select(Select::columns(cols));
             }
-            q.execute()
-                .await
-                .map_err(|e| FirnflowError::Backend(format!("fts.execute: {e}")))?
+            execute_query(q.execute(), filter.is_some(), "fts.execute").await?
         };
 
         let batches: Vec<RecordBatch> = stream
@@ -1828,6 +1836,70 @@ fn map_import_lance_error(e: lancedb::Error) -> FirnflowError {
             FirnflowError::InvalidRequest(format!("import: malformed Arrow data: {e}"))
         }
         other => FirnflowError::Backend(format!("table.add: {other}")),
+    }
+}
+
+/// Run a query's `execute()` future, mapping errors for the caller.
+///
+/// When a `filter` is set, the DataFusion predicate is parsed and planned
+/// inside `execute()`. Lance 6's SQL planner `todo!()`s on some
+/// parseable-but-unimplemented predicate syntax (national and bit string
+/// literals, `N'x'` / `B'1'`), which would unwind the request task. Catch that
+/// panic and report an unsupported predicate (400) rather than letting a
+/// client-controlled `filter` string crash the request; a returned error is
+/// classified by [`classify_filter_error`]. Without a filter the future is
+/// awaited directly and any error is a backend failure.
+async fn execute_query<S>(
+    fut: impl std::future::Future<Output = Result<S, lancedb::Error>>,
+    has_filter: bool,
+    backend_ctx: &str,
+) -> Result<S, FirnflowError> {
+    if has_filter {
+        match std::panic::AssertUnwindSafe(fut).catch_unwind().await {
+            Ok(result) => result.map_err(classify_filter_error),
+            Err(_panic) => Err(FirnflowError::InvalidRequest(
+                "query filter: unsupported predicate".into(),
+            )),
+        }
+    } else {
+        fut.await
+            .map_err(|e| FirnflowError::Backend(format!("{backend_ctx}: {e}")))
+    }
+}
+
+/// Map a lancedb error from a *filtered* query into a caller-facing error.
+///
+/// A bad `filter` predicate is the caller's fault and surfaces as
+/// [`FirnflowError::InvalidRequest`] (400); a storage or runtime failure on the
+/// same query stays [`FirnflowError::Backend`] (500), so an S3 timeout is not
+/// misreported as a bad predicate. Predicate problems (parse errors, unknown
+/// columns, type resolution, unsupported syntax) reach us as
+/// `lance::Error::InvalidInput` or `lance::Error::Schema`, so those map to 400
+/// and everything else, object-store and IO failures included, maps to 500.
+///
+/// This is deliberately broad rather than trying to sub-classify `InvalidInput`
+/// by message. `InvalidInput` is occasionally raised for a non-predicate reason
+/// (an FTS query on a namespace with no inverted index), which then also
+/// returns 400 rather than 500. That is an accepted trade: a missing-index 400
+/// is a reasonable "build the index" answer, and the alternative, matching
+/// lance-datafusion message strings, is fragile and mislabels the many genuine
+/// bad-predicate shapes (unknown functions, unsupported operators, bad regex)
+/// as backend errors. Genuine storage failures are `ObjectStore`/`IO` variants,
+/// not `InvalidInput`, so they are unaffected. The inner-error shape can shift
+/// across Lance minors, so this is locked by the filter tests in
+/// `service_query_filter.rs`.
+fn classify_filter_error(e: lancedb::Error) -> FirnflowError {
+    let predicate_error = matches!(
+        &e,
+        lancedb::Error::Lance {
+            source: lance::Error::InvalidInput { .. } | lance::Error::Schema { .. },
+        } | lancedb::Error::InvalidInput { .. }
+            | lancedb::Error::Schema { .. }
+    );
+    if predicate_error {
+        FirnflowError::InvalidRequest(format!("query filter: {e}"))
+    } else {
+        FirnflowError::Backend(format!("filtered query: {e}"))
     }
 }
 

@@ -215,6 +215,10 @@ curl -X POST http://localhost:3000/ns/demo/query \
 
 Hits carry the stored vector by default. Add `"include_vector": false` to the request if you only need ids, scores, and text. At realistic dimensions the vectors are most of the response bytes, so skipping them shrinks the response and the cached result, and can cut the object-storage read for the returned rows' vectors. It is response projection, not a scan optimisation: Lance still reads whatever it needs to score the query.
 
+Add `"filter": "id > 1000"` or an `_ingested_at` predicate to scope vector, full-text, or hybrid search to matching rows. Filters use the same DataFusion SQL predicate dialect as `/list` and are applied before nearest-neighbour ranking, so vector queries return up to `k` neighbours that satisfy the predicate.
+
+A filtered request is cached by the exact text of its predicate, so avoid volatile SQL functions such as `now()` or `random()` in a filter. A repeated identical request keeps serving the first result until the namespace is next written to, which for `now()` means the cutoff never advances. Use a fixed timestamp bound (for example a literal `_ingested_at` microsecond value) rather than `now()`.
+
 ### 4. Check the Savings
 See how much object-storage traffic you've avoided:
 
@@ -347,7 +351,7 @@ The read path is:
 
 **v1 boundaries** (returns 400 otherwise):
 
-- single-vector queries only: `vectors`, `text`, and hybrid shapes are rejected when `semantic_cache.enabled` is true;
+- single-vector queries only: `vectors`, `text`, `filter`, and hybrid shapes are rejected when `semantic_cache.enabled` is true;
 - `min_similarity` must be in `(0.0, 1.0]`. Omitting picks a deliberately strict default of `0.995`;
 - the sidecar is in-memory, single-process, and bounded to 1024 entries per namespace generation. Any committed change drops both layers for the namespace: writes, deletes, and compactions, and also index builds, since an index build is itself a Lance commit that advances the table version the cache keys on.
 
