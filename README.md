@@ -217,6 +217,8 @@ Hits carry the stored vector by default. Add `"include_vector": false` to the re
 
 Add `"filter": "id > 1000"` or an `_ingested_at` predicate to scope vector, full-text, or hybrid search to matching rows. Filters use the same DataFusion SQL predicate dialect as `/list` and are applied before nearest-neighbour ranking, so vector queries return up to `k` neighbours that satisfy the predicate.
 
+A filtered request is cached by the exact text of its predicate, so avoid volatile SQL functions such as `now()` or `random()` in a filter. A repeated identical request keeps serving the first result until the namespace is next written to, which for `now()` means the cutoff never advances. Use a fixed timestamp bound (for example a literal `_ingested_at` microsecond value) rather than `now()`.
+
 ### 4. Check the Savings
 See how much object-storage traffic you've avoided:
 
