@@ -68,15 +68,23 @@ async fn local_service() -> (NamespaceService, NamespaceId, TempDir, TempDir) {
 }
 
 /// A filtered query whose predicate is the caller's fault must map to
-/// `InvalidRequest` (400), not `Backend` (500). Covers the three predicate
-/// failure shapes: a SQL syntax error, an unknown column, and a type
-/// mismatch. Backend failures on a filtered query still map to `Backend`;
-/// that path is not reachable from local storage, so it is covered by the
-/// classifier's default arm rather than a test here.
+/// `InvalidRequest` (400), not `Backend` (500). Covers a spread of predicate
+/// failure shapes: a SQL syntax error, an unknown column, a type mismatch, an
+/// unknown function, and an unsupported operator. The last two are the cases a
+/// narrower message-matching classifier mislabeled as 500, so they pin the
+/// broad classification. Genuine backend failures on a filtered query still map
+/// to `Backend`; that path is not reachable from local storage, so it is
+/// covered by the classifier's default arm rather than a test here.
 #[tokio::test]
 async fn filtered_predicate_errors_map_to_invalid_request() {
     let (service, ns, _dir, _cache_dir) = local_service().await;
-    for bad in ["id =", "nope > 1", "text > 1"] {
+    for bad in [
+        "id =",               // SQL parse error
+        "nope > 1",           // unknown column
+        "text > 1",           // type mismatch
+        "no_such_fn(id) = 1", // unknown function
+        "id @> 1",            // unsupported operator
+    ] {
         let req = request(Some(bad));
         let err = service
             .query_with_cache_source(&ns, &req)
@@ -112,12 +120,14 @@ async fn filtered_unsupported_syntax_maps_to_invalid_request() {
     }
 }
 
-/// A filtered full-text query on a namespace with no inverted index fails on a
-/// backend prerequisite, not a bad predicate. It must stay a 500, the same as
-/// the unfiltered path, rather than being mislabeled a 400 by the filter-error
-/// classifier.
+/// A filtered full-text query on a namespace with no inverted index fails with
+/// `InvalidInput`. The filter-error classifier is deliberately broad, so this
+/// maps to a 400 rather than a 500. That is an accepted trade (a missing-index
+/// 400 reads as "build the index"); the alternative, message-matching to force
+/// it to 500, would mislabel genuine bad predicates as backend errors. This
+/// test pins the chosen behaviour so a future change to it is a conscious one.
 #[tokio::test]
-async fn filtered_fts_without_index_is_backend_error() {
+async fn filtered_fts_without_index_maps_to_invalid_request() {
     let (service, ns, _dir, _cache_dir) = local_service().await;
     let req = QueryRequest {
         vector: Vec::new(),
@@ -134,8 +144,8 @@ async fn filtered_fts_without_index_is_backend_error() {
         .await
         .expect_err("fts query without an index should error");
     assert!(
-        matches!(err, FirnflowError::Backend(_)),
-        "missing FTS index must be a backend error, got {err:?}"
+        matches!(err, FirnflowError::InvalidRequest(_)),
+        "missing FTS index on a filtered query maps to InvalidRequest, got {err:?}"
     );
 }
 

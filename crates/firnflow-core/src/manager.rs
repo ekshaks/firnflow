@@ -1870,47 +1870,37 @@ async fn execute_query<S>(
 /// Map a lancedb error from a *filtered* query into a caller-facing error.
 ///
 /// A bad `filter` predicate is the caller's fault and surfaces as
-/// [`FirnflowError::InvalidRequest`] (400); a storage or runtime failure on
-/// the same query stays [`FirnflowError::Backend`] (500), so an S3 timeout is
-/// not misreported as a bad predicate. An unknown column referenced by the
-/// predicate reaches us as `lance::Error::Schema` and is always a predicate
-/// error. `lance::Error::InvalidInput`, however, is raised both for predicate
-/// problems (SQL parse or type resolution) *and* for unrelated backend
-/// prerequisites (an FTS query on a namespace with no inverted index), so for
-/// that variant we only claim a 400 when the message carries a lance-datafusion
-/// parser/planner marker; everything else stays a backend failure. These
-/// message markers and the inner-error shape can shift across Lance minors, so
-/// this classification is locked by the filter tests in
+/// [`FirnflowError::InvalidRequest`] (400); a storage or runtime failure on the
+/// same query stays [`FirnflowError::Backend`] (500), so an S3 timeout is not
+/// misreported as a bad predicate. Predicate problems (parse errors, unknown
+/// columns, type resolution, unsupported syntax) reach us as
+/// `lance::Error::InvalidInput` or `lance::Error::Schema`, so those map to 400
+/// and everything else, object-store and IO failures included, maps to 500.
+///
+/// This is deliberately broad rather than trying to sub-classify `InvalidInput`
+/// by message. `InvalidInput` is occasionally raised for a non-predicate reason
+/// (an FTS query on a namespace with no inverted index), which then also
+/// returns 400 rather than 500. That is an accepted trade: a missing-index 400
+/// is a reasonable "build the index" answer, and the alternative, matching
+/// lance-datafusion message strings, is fragile and mislabels the many genuine
+/// bad-predicate shapes (unknown functions, unsupported operators, bad regex)
+/// as backend errors. Genuine storage failures are `ObjectStore`/`IO` variants,
+/// not `InvalidInput`, so they are unaffected. The inner-error shape can shift
+/// across Lance minors, so this is locked by the filter tests in
 /// `service_query_filter.rs`.
 fn classify_filter_error(e: lancedb::Error) -> FirnflowError {
-    let predicate_error = match &e {
+    let predicate_error = matches!(
+        &e,
         lancedb::Error::Lance {
-            source: lance::Error::Schema { .. },
-        }
-        | lancedb::Error::Schema { .. } => true,
-        lancedb::Error::Lance {
-            source: lance::Error::InvalidInput { .. },
-        }
-        | lancedb::Error::InvalidInput { .. } => is_predicate_parse_message(&e.to_string()),
-        _ => false,
-    };
+            source: lance::Error::InvalidInput { .. } | lance::Error::Schema { .. },
+        } | lancedb::Error::InvalidInput { .. }
+            | lancedb::Error::Schema { .. }
+    );
     if predicate_error {
         FirnflowError::InvalidRequest(format!("query filter: {e}"))
     } else {
         FirnflowError::Backend(format!("filtered query: {e}"))
     }
-}
-
-/// Whether a lance-datafusion error message originates from parsing or
-/// resolving the SQL predicate, as opposed to another `InvalidInput` cause.
-/// Markers observed from lance-datafusion 6.0.0's `sql`, `planner`, and
-/// `logical_expr` modules; kept together so a Lance bump that reworks the
-/// wording fails the filter tests loudly rather than silently misclassifying.
-fn is_predicate_parse_message(msg: &str) -> bool {
-    msg.contains("sql parser error")
-        || msg.contains("Error parsing statement")
-        || msg.contains("resolving filter expression")
-        || msg.contains("not supported SQL in lance")
 }
 
 /// Adapts a client `/import` Arrow stream into Firn's canonical table
