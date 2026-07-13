@@ -52,6 +52,11 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
+          # Pin to the toolchain CI validates against. Without this the
+          # manylinux container floats to the latest stable Rust, which drifted
+          # to 1.97 and stopped compiling the pinned `ethnum` (E0512), failing
+          # the wheel build while CI on 1.94 stayed green.
+          rust-toolchain: "1.94"
           target: ${{ matrix.platform.target }}
           manylinux: ${{ matrix.platform.manylinux || 'auto' }}
           # The manylinux container has no protoc. Download a pinned
