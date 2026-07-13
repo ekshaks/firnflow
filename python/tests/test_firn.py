@@ -58,7 +58,9 @@ def test_search_filter(db):
         ]
     )
     hits = db.search(vector=[1.0, 0.0, 0.0, 0.0], limit=3, filter="id > 1")
-    assert [h.id for h in hits] == [2, 3]
+    # Rows 2 and 3 are equidistant from the query vector, so their relative
+    # order is an undefined tie. Assert on the narrowed set, not the order.
+    assert sorted(h.id for h in hits) == [2, 3]
 
 
 def test_tenant_isolation(db):
