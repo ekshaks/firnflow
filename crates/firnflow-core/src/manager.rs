@@ -45,7 +45,7 @@ use arrow_array::{
 };
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef, TimeUnit};
 use dashmap::DashMap;
-use futures::{StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use lance::dataset::scanner::ColumnOrdering;
 use lance::dataset::{WriteMode, WriteParams};
 use lancedb::index::scalar::{BTreeIndexBuilder, FtsIndexBuilder, FullTextSearchQuery};
@@ -1141,13 +1141,7 @@ impl NamespaceManager {
             if let Some(ref cols) = projection {
                 vq = vq.select(Select::columns(cols));
             }
-            vq.execute().await.map_err(|e| {
-                if filter.is_some() {
-                    classify_filter_error(e)
-                } else {
-                    FirnflowError::Backend(format!("query.execute: {e}"))
-                }
-            })?
+            execute_query(vq.execute(), filter.is_some(), "query.execute").await?
         } else {
             // FTS-only
             let t = text.unwrap();
@@ -1161,13 +1155,7 @@ impl NamespaceManager {
             if let Some(ref cols) = projection {
                 q = q.select(Select::columns(cols));
             }
-            q.execute().await.map_err(|e| {
-                if filter.is_some() {
-                    classify_filter_error(e)
-                } else {
-                    FirnflowError::Backend(format!("fts.execute: {e}"))
-                }
-            })?
+            execute_query(q.execute(), filter.is_some(), "fts.execute").await?
         };
 
         let batches: Vec<RecordBatch> = stream
@@ -1851,33 +1839,78 @@ fn map_import_lance_error(e: lancedb::Error) -> FirnflowError {
     }
 }
 
+/// Run a query's `execute()` future, mapping errors for the caller.
+///
+/// When a `filter` is set, the DataFusion predicate is parsed and planned
+/// inside `execute()`. Lance 6's SQL planner `todo!()`s on some
+/// parseable-but-unimplemented predicate syntax (national and bit string
+/// literals, `N'x'` / `B'1'`), which would unwind the request task. Catch that
+/// panic and report an unsupported predicate (400) rather than letting a
+/// client-controlled `filter` string crash the request; a returned error is
+/// classified by [`classify_filter_error`]. Without a filter the future is
+/// awaited directly and any error is a backend failure.
+async fn execute_query<S>(
+    fut: impl std::future::Future<Output = Result<S, lancedb::Error>>,
+    has_filter: bool,
+    backend_ctx: &str,
+) -> Result<S, FirnflowError> {
+    if has_filter {
+        match std::panic::AssertUnwindSafe(fut).catch_unwind().await {
+            Ok(result) => result.map_err(classify_filter_error),
+            Err(_panic) => Err(FirnflowError::InvalidRequest(
+                "query filter: unsupported predicate".into(),
+            )),
+        }
+    } else {
+        fut.await
+            .map_err(|e| FirnflowError::Backend(format!("{backend_ctx}: {e}")))
+    }
+}
+
 /// Map a lancedb error from a *filtered* query into a caller-facing error.
 ///
 /// A bad `filter` predicate is the caller's fault and surfaces as
 /// [`FirnflowError::InvalidRequest`] (400); a storage or runtime failure on
 /// the same query stays [`FirnflowError::Backend`] (500), so an S3 timeout is
-/// not misreported as a bad predicate. A malformed, unknown-column, or
-/// mistyped predicate reaches us as `lancedb::Error::Lance` wrapping
-/// `lance::Error::InvalidInput` (SQL parse or type resolution) or
-/// `lance::Error::Schema` (unknown column); object-store and IO failures wrap
-/// a different inner variant. Anything not recognised as a predicate problem
-/// maps to `Backend`. The predicate is parsed and planned inside `execute()`,
-/// so filtered-query errors surface there rather than during the scan. The
-/// inner-error shape can shift across Lance minors, so this classification is
-/// locked by the filter tests in `service_query_filter.rs`.
+/// not misreported as a bad predicate. An unknown column referenced by the
+/// predicate reaches us as `lance::Error::Schema` and is always a predicate
+/// error. `lance::Error::InvalidInput`, however, is raised both for predicate
+/// problems (SQL parse or type resolution) *and* for unrelated backend
+/// prerequisites (an FTS query on a namespace with no inverted index), so for
+/// that variant we only claim a 400 when the message carries a lance-datafusion
+/// parser/planner marker; everything else stays a backend failure. These
+/// message markers and the inner-error shape can shift across Lance minors, so
+/// this classification is locked by the filter tests in
+/// `service_query_filter.rs`.
 fn classify_filter_error(e: lancedb::Error) -> FirnflowError {
-    let predicate_error = matches!(
-        &e,
+    let predicate_error = match &e {
         lancedb::Error::Lance {
-            source: lance::Error::InvalidInput { .. } | lance::Error::Schema { .. },
-        } | lancedb::Error::InvalidInput { .. }
-            | lancedb::Error::Schema { .. }
-    );
+            source: lance::Error::Schema { .. },
+        }
+        | lancedb::Error::Schema { .. } => true,
+        lancedb::Error::Lance {
+            source: lance::Error::InvalidInput { .. },
+        }
+        | lancedb::Error::InvalidInput { .. } => is_predicate_parse_message(&e.to_string()),
+        _ => false,
+    };
     if predicate_error {
         FirnflowError::InvalidRequest(format!("query filter: {e}"))
     } else {
         FirnflowError::Backend(format!("filtered query: {e}"))
     }
+}
+
+/// Whether a lance-datafusion error message originates from parsing or
+/// resolving the SQL predicate, as opposed to another `InvalidInput` cause.
+/// Markers observed from lance-datafusion 6.0.0's `sql`, `planner`, and
+/// `logical_expr` modules; kept together so a Lance bump that reworks the
+/// wording fails the filter tests loudly rather than silently misclassifying.
+fn is_predicate_parse_message(msg: &str) -> bool {
+    msg.contains("sql parser error")
+        || msg.contains("Error parsing statement")
+        || msg.contains("resolving filter expression")
+        || msg.contains("not supported SQL in lance")
 }
 
 /// Adapts a client `/import` Arrow stream into Firn's canonical table

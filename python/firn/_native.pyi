@@ -29,6 +29,7 @@ class Collection:
         hybrid: bool = False,
         limit: int = 10,
         tenant: Optional[str] = None,
+        filter: Optional[str] = None,
         include_vectors: bool = False,
     ) -> list[Hit]: ...
 
@@ -50,6 +51,7 @@ class Client:
         hybrid: bool = False,
         limit: int = 10,
         tenant: Optional[str] = None,
+        filter: Optional[str] = None,
         include_vectors: bool = False,
     ) -> list[Hit]: ...
     def close(self) -> None: ...

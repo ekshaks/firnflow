@@ -91,6 +91,54 @@ async fn filtered_predicate_errors_map_to_invalid_request() {
     }
 }
 
+/// A predicate that parses but reaches an unimplemented path in Lance's SQL
+/// planner (national or bit string literals) panics inside `execute()`. The
+/// filtered path must catch that and report a 400, not unwind the request.
+#[tokio::test]
+async fn filtered_unsupported_syntax_maps_to_invalid_request() {
+    let (service, ns, _dir, _cache_dir) = local_service().await;
+    for bad in ["text = N'x'", "text = B'1'"] {
+        let req = request(Some(bad));
+        let err = service
+            .query_with_cache_source(&ns, &req)
+            .await
+            .expect_err("unsupported predicate syntax should error, not panic");
+        match err {
+            FirnflowError::InvalidRequest(msg) => {
+                assert!(msg.contains("filter"), "predicate {bad:?}: {msg}")
+            }
+            other => panic!("predicate {bad:?}: expected InvalidRequest, got {other:?}"),
+        }
+    }
+}
+
+/// A filtered full-text query on a namespace with no inverted index fails on a
+/// backend prerequisite, not a bad predicate. It must stay a 500, the same as
+/// the unfiltered path, rather than being mislabeled a 400 by the filter-error
+/// classifier.
+#[tokio::test]
+async fn filtered_fts_without_index_is_backend_error() {
+    let (service, ns, _dir, _cache_dir) = local_service().await;
+    let req = QueryRequest {
+        vector: Vec::new(),
+        vectors: None,
+        k: 10,
+        nprobes: None,
+        text: Some("anything".into()),
+        filter: Some("id > 1".into()),
+        include_vector: false,
+        semantic_cache: None,
+    };
+    let err = service
+        .query_with_cache_source(&ns, &req)
+        .await
+        .expect_err("fts query without an index should error");
+    assert!(
+        matches!(err, FirnflowError::Backend(_)),
+        "missing FTS index must be a backend error, got {err:?}"
+    );
+}
+
 #[tokio::test]
 async fn filtered_and_unfiltered_queries_cache_independently() {
     let (service, ns, _dir, _cache_dir) = local_service().await;
