@@ -19,6 +19,7 @@ db.add([
 hits = db.search("fox")                            # full-text (BM25)
 hits = db.search(vector=[0.1, 0.2, 0.3])           # nearest-neighbour
 hits = db.search("fox", vector=[0.1, 0.2, 0.3])    # hybrid (fused)
+hits = db.search(vector=[0.1, 0.2, 0.3], filter="id > 1")  # with a prefilter
 for hit in hits:
     print(hit.id, hit.score, hit.text)
 ```
