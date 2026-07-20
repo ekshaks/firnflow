@@ -23,6 +23,7 @@ use bincode::config;
 use serde::Serialize;
 
 use crate::cache::{NamespaceCache, QueryHash, SemanticCache, SemanticLookup};
+use crate::filter::{classify_filter, FilterCacheability};
 use crate::manager::{CompactResult, NamespaceManager, UpsertRow};
 use crate::metrics::CoreMetrics;
 use crate::query::{
@@ -242,6 +243,18 @@ impl NamespaceService {
         let generation = self.manager.generation(ns).await?;
         self.cache.set_generation(ns, generation);
 
+        // A filter whose meaning can change between two identical
+        // requests must not be served from — or written to — the
+        // exact cache, which would otherwise replay the first result
+        // until the namespace is next written to (#89). `now()` is
+        // the motivating case. Analysed per request against the
+        // namespace schema; unfiltered queries, the common path, skip
+        // this entirely and pay nothing.
+        let exact_cacheable = match req.filter.as_deref() {
+            None => true,
+            Some(f) => self.filter_is_cacheable(ns, f).await?,
+        };
+
         // 1. Exact cache — always consulted, opt-in or not. A payload
         //    that fails to decode is treated as a miss, not an error:
         //    the NVMe tier survives restarts, so after an upgrade that
@@ -250,7 +263,15 @@ impl NamespaceService {
         //    fall-through re-runs the query and repopulates the entry
         //    with the current format — self-healing, at the cost of
         //    one backend round-trip.
-        let (exact_hit, captured_generation) = self.cache.try_get(ns, query_hash).await;
+        //    A request bypassing the cache records neither a hit nor
+        //    a miss: it never consults the cache, so counting it
+        //    either way would distort the hit rate rather than
+        //    describe it.
+        let (exact_hit, captured_generation) = if exact_cacheable {
+            self.cache.try_get(ns, query_hash).await
+        } else {
+            (None, generation)
+        };
         if let Some(bytes) = exact_hit {
             match decode_payload(&bytes) {
                 Ok(decoded) => {
@@ -358,8 +379,19 @@ impl NamespaceService {
             )
             .await?;
         let bytes = encode_payload(&result)?;
-        self.cache
-            .populate_with_generation(ns, captured_generation, query_hash, bytes.clone());
+        if exact_cacheable {
+            self.cache
+                .populate_with_generation(ns, captured_generation, query_hash, bytes.clone());
+        }
+        // Deliberately not gated on `exact_cacheable`: the sidecar
+        // never sees a filtered request at all. `semantic_eligible`
+        // requires `req.filter.is_none()`, and a filtered request
+        // that opts in is rejected outright by
+        // `validate_semantic_cache_request` at the top of this
+        // function. So there is no filtered path into the sidecar for
+        // the cacheability check to guard. Should the sidecar ever
+        // support filters, this needs the same gate as the exact
+        // cache above.
         if semantic_eligible {
             self.semantic.insert(
                 ns,
@@ -378,6 +410,53 @@ impl NamespaceService {
             result,
             cache_source: QueryCacheSource::Backend,
         })
+    }
+
+    /// Whether a filtered request may use the exact result cache.
+    ///
+    /// A predicate is safe to cache only when every function in it
+    /// returns the same value on every evaluation. `_ingested_at <
+    /// now()` is the case that motivates this: cached once, it would
+    /// keep replaying the first result set while the cutoff it
+    /// describes moves on, until the namespace is next written to.
+    /// See [`crate::filter`] for why this is decided by planning the
+    /// predicate rather than reading its text.
+    ///
+    /// A namespace with no schema has never been written to, and is
+    /// reported uncacheable rather than cacheable. The predicate
+    /// cannot be analysed without a schema, and the alternative —
+    /// assuming it is safe — loses the guarantee to a first-write
+    /// race: this check and the cache population that follows it are
+    /// not atomic, so a concurrent first write can land in between
+    /// and leave the query returning rows that a volatile predicate
+    /// then caches. Refusing to cache costs nothing here, since a
+    /// query against a namespace with no rows returns an empty
+    /// result set that is not worth an entry.
+    async fn filter_is_cacheable(
+        &self,
+        ns: &NamespaceId,
+        filter: &str,
+    ) -> Result<bool, FirnflowError> {
+        let Some(schema) = self.manager.filter_schema(ns).await? else {
+            return Ok(false);
+        };
+        match classify_filter(schema, filter) {
+            FilterCacheability::Cacheable => Ok(true),
+            FilterCacheability::NonImmutable { function } => {
+                tracing::debug!(
+                    namespace = %ns,
+                    function = %function,
+                    "query filter calls a function whose result can change \
+                     between identical requests; bypassing the result cache"
+                );
+                Ok(false)
+            }
+            // The predicate did not plan here, so it will not plan in
+            // LanceDB either and the request is about to fail with a
+            // 400 carrying the engine's own message. Bypassing costs
+            // nothing on a request that returns no result to cache.
+            FilterCacheability::Unplannable => Ok(false),
+        }
     }
 
     /// Build an IVF_PQ index on the namespace's vector column.
