@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-07-20
+
 ### Fixed
 - A query `filter` whose result can change between two identical requests no longer serves a stale cached result. The exact result cache keys on the predicate's text, which is correct for a stable predicate like `section = 'warnings'` and wrong for one like `_ingested_at < now()`: cached once, it kept replaying the first result set while the cutoff it described moved on, until the namespace was next written to. Such a predicate now bypasses the result cache in both directions — neither read nor written — so it always reflects the backend. Stable predicates, the common case, keep the cached fast path. The decision is made by planning the predicate with the same planner and function registry LanceDB uses to run it and inspecting the resulting expression tree, not by matching on the predicate text: a column named `now` still caches normally, and the parenthesis-free `CURRENT_TIMESTAMP` spelling is caught even though it is not a function call until the planner rewrites it. Note that the functions this affects include `now()`, `current_timestamp`, and `current_date`, which the planner classifies as *stable* rather than *volatile* — fixed within a single query, free to differ between queries, and so no safer to cache than `random()`. Closes #89.
 
@@ -230,7 +232,9 @@ development through phases 1 through 8 before being made public;
   benchmark at dim=1536, 100k rows available at
   `bench/results/cold_vs_warm_aws.md`.
 
-[Unreleased]: https://github.com/gordonmurray/firnflow/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/gordonmurray/firnflow/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/gordonmurray/firnflow/compare/v0.9.3...v0.9.4
+[0.9.3]: https://github.com/gordonmurray/firnflow/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/gordonmurray/firnflow/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/gordonmurray/firnflow/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gordonmurray/firnflow/compare/v0.8.1...v0.9.0
