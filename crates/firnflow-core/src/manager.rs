@@ -333,6 +333,31 @@ impl NamespaceManager {
         }
     }
 
+    /// The Arrow schema a filter predicate is planned against, or
+    /// `None` for a namespace that has never been written to.
+    ///
+    /// Rebuilt from the cached `(kind, dim, has_ingested_at)` triple
+    /// rather than read off the table, so a warm namespace answers
+    /// from memory with no object-store round-trip. That matters
+    /// because the caller
+    /// ([`NamespaceService::query`](crate::NamespaceService::query))
+    /// needs this on the read path, before deciding whether the
+    /// request may consult the result cache.
+    ///
+    /// The schema carries the same columns a caller can filter on —
+    /// `id`, `vector`, `text`, and `_ingested_at` when present — so
+    /// a predicate that plans against it is one that will plan
+    /// against the live table.
+    pub async fn filter_schema(
+        &self,
+        ns: &NamespaceId,
+    ) -> Result<Option<SchemaRef>, FirnflowError> {
+        Ok(self
+            .resolve_schema_info(ns)
+            .await?
+            .map(|info| Self::schema_for_kind(info.kind, info.dim, info.has_ingested_at)))
+    }
+
     /// Hash an open table's manifest `(version, timestamp_nanos)` into a
     /// `u64` cache generation. Both fields live in the in-memory
     /// manifest, so on a warm handle this is an in-memory read.

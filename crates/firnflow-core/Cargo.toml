@@ -26,6 +26,22 @@ object_store.workspace = true
 # custom ObjectStoreProvider. lance-io provides the provider/registry traits;
 # the rest are needed to implement object_store::ObjectStore for the wrapper.
 lance-io = "=6.0.0"
+# Filter cacheability analysis (issue #89): a predicate is planned with the
+# same planner and function registry LanceDB uses to run it, then walked for
+# functions whose result can change between two identical requests. All three
+# are already in the tree through lancedb; naming them here makes the
+# dependency explicit rather than transitive. Exact-pinned with the rest of
+# the lance family — datafusion 53.1.0 is what lance 6.0.0 resolves to, and
+# the versions must agree for the planner's `Expr` to be the type we match on.
+#
+# The two datafusion subcrates rather than the `datafusion` umbrella on
+# purpose: the umbrella's default features pull a Parquet reader and its
+# bzip2/lzma/snap/thrift compression stack into the build, none of which this
+# analysis touches. `datafusion-common` supplies the expression tree walk and
+# `datafusion-expr` the `Expr` and `Volatility` types, which is all of it.
+lance-datafusion = "=6.0.0"
+datafusion-common = "=53.1.0"
+datafusion-expr = "=53.1.0"
 async-trait = "0.1"
 bytes = "1"
 chrono = "0.4"

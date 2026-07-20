@@ -217,7 +217,9 @@ Hits carry the stored vector by default. Add `"include_vector": false` to the re
 
 Add `"filter": "id > 1000"` or an `_ingested_at` predicate to scope vector, full-text, or hybrid search to matching rows. Filters use the same DataFusion SQL predicate dialect as `/list` and are applied before nearest-neighbour ranking, so vector queries return up to `k` neighbours that satisfy the predicate.
 
-A filtered request is cached by the exact text of its predicate, so avoid volatile SQL functions such as `now()` or `random()` in a filter. A repeated identical request keeps serving the first result until the namespace is next written to, which for `now()` means the cutoff never advances. Use a fixed timestamp bound (for example a literal `_ingested_at` microsecond value) rather than `now()`.
+A filtered request is cached by the exact text of its predicate. That is only safe when the predicate means the same thing every time it runs, so a filter calling a function whose result can move between two identical requests — `now()`, `current_timestamp`, `current_date`, `random()` — skips the result cache and always runs against the backend. Those queries stay correct at the cost of the cache's speedup; everything else keeps the fast path. The check plans the predicate rather than reading its text, so a column named `now` is still cached normally.
+
+If you are filtering on recency and want the cache, use a fixed bound your client computes (a literal `_ingested_at` microsecond value) rather than `now()`. Two requests a second apart then share a cache entry, where `now()` would correctly refuse to.
 
 ### 4. Check the Savings
 See how much object-storage traffic you've avoided:

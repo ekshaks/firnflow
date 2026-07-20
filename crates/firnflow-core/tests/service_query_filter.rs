@@ -215,6 +215,151 @@ async fn distinct_filters_do_not_collide_in_exact_cache() {
     assert_eq!(ids_b, vec![2, 3]);
 }
 
+/// A predicate whose meaning can change between two identical
+/// requests must never be served from the exact cache (#89).
+///
+/// Both repeats reporting `Backend` is a complete proof of the
+/// mechanism in one assertion: had the first response been written
+/// to the cache, the second would have come back as `ExactCache`. So
+/// this pins the read bypass and the write bypass together.
+///
+/// `now()` is `Stable` rather than `Volatile` in the query planner —
+/// fixed within one query, free to move between them — which is
+/// exactly the level a check for "is it volatile" would miss, so it
+/// leads the list here. The bare `CURRENT_TIMESTAMP` spelling is
+/// included because it is not a function call in the parsed SQL at
+/// all; it becomes `now()` only after the planner rewrites it.
+#[tokio::test]
+async fn volatile_filters_never_serve_from_the_exact_cache() {
+    let (service, ns, _dir, _cache_dir) = local_service().await;
+
+    for filter in [
+        "_ingested_at < now()",
+        "_ingested_at < CURRENT_TIMESTAMP",
+        "_ingested_at < current_date",
+        "random() < 1.1",
+        "id > 0 AND random() < 1.1",
+    ] {
+        let req = request(Some(filter));
+
+        let first = service
+            .query_with_cache_source(&ns, &req)
+            .await
+            .unwrap_or_else(|e| panic!("{filter:?} first query: {e}"));
+        assert_eq!(
+            first.cache_source,
+            QueryCacheSource::Backend,
+            "{filter:?} first query should reach the backend"
+        );
+
+        let second = service
+            .query_with_cache_source(&ns, &req)
+            .await
+            .unwrap_or_else(|e| panic!("{filter:?} second query: {e}"));
+        assert_eq!(
+            second.cache_source,
+            QueryCacheSource::Backend,
+            "{filter:?} repeat must re-run rather than replay a cached result"
+        );
+    }
+}
+
+/// Bypassing the cache must not change what a volatile filter
+/// returns — the rows are still filtered, just never cached. All
+/// three seed rows carry an `_ingested_at` in the past, so a `<
+/// now()` cutoff selects all of them.
+#[tokio::test]
+async fn volatile_filtered_queries_still_return_filtered_rows() {
+    let (service, ns, _dir, _cache_dir) = local_service().await;
+
+    let all = service
+        .query_with_cache_source(&ns, &request(Some("_ingested_at < now()")))
+        .await
+        .expect("now() filter");
+    let mut ids: Vec<u64> = all.result.results.iter().map(|r| r.id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec![1, 2, 3]);
+
+    let narrowed = service
+        .query_with_cache_source(&ns, &request(Some("id > 1 AND _ingested_at < now()")))
+        .await
+        .expect("combined filter");
+    let mut ids: Vec<u64> = narrowed.result.results.iter().map(|r| r.id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec![2, 3]);
+}
+
+/// The bypass is scoped to the predicates that need it. A stable
+/// filter keeps the cached fast path, and a column that merely
+/// happens to be named `now` is stable — the trap a text search for
+/// `now(` would fall into. Guards against a fix that quietly
+/// disables caching for every filtered query.
+#[tokio::test]
+async fn stable_filters_keep_the_cached_fast_path() {
+    let (service, ns, _dir, _cache_dir) = local_service().await;
+
+    let req = request(Some("id > 1"));
+    let first = service
+        .query_with_cache_source(&ns, &req)
+        .await
+        .expect("stable filter #1");
+    assert_eq!(first.cache_source, QueryCacheSource::Backend);
+
+    let second = service
+        .query_with_cache_source(&ns, &req)
+        .await
+        .expect("stable filter #2");
+    assert_eq!(second.cache_source, QueryCacheSource::ExactCache);
+    assert_eq!(second.result, first.result);
+}
+
+/// A filtered query against a namespace that has never been written
+/// to must not populate the exact cache.
+///
+/// The predicate cannot be analysed without a schema, and treating
+/// it as cacheable would lose the guarantee to a first-write race:
+/// the cacheability check and the cache population that follows are
+/// not atomic, so a concurrent first write can land between them and
+/// leave the query returning rows a volatile predicate then caches.
+/// Nothing is given up by refusing — the result set is empty.
+#[tokio::test]
+async fn filtered_query_on_unwritten_namespace_does_not_cache() {
+    let dir = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let metrics = test_metrics();
+    let manager = Arc::new(NamespaceManager::new(
+        StorageRoot::local(dir.path()).unwrap(),
+        HashMap::new(),
+        Arc::clone(&metrics),
+    ));
+    let cache = Arc::new(
+        NamespaceCache::new(
+            16 * 1024 * 1024,
+            cache_dir.path(),
+            64 * 1024 * 1024,
+            Arc::clone(&metrics),
+        )
+        .await
+        .expect("cache"),
+    );
+    let service = NamespaceService::new(Arc::clone(&manager), cache, metrics);
+    let ns = NamespaceId::new("never-written").unwrap();
+
+    let req = request(Some("id > 1"));
+    for attempt in 1..=2 {
+        let out = service
+            .query_with_cache_source(&ns, &req)
+            .await
+            .unwrap_or_else(|e| panic!("attempt {attempt}: {e}"));
+        assert!(out.result.results.is_empty(), "attempt {attempt}");
+        assert_eq!(
+            out.cache_source,
+            QueryCacheSource::Backend,
+            "attempt {attempt} must not be served from the cache"
+        );
+    }
+}
+
 #[tokio::test]
 async fn filtered_semantic_cache_request_is_rejected() {
     let (service, ns, _dir, _cache_dir) = local_service().await;
