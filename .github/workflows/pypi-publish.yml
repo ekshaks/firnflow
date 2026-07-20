@@ -6,9 +6,22 @@
 # version (PyPI rejects duplicate versions).
 #
 # Flow: build the wheel matrix + sdist -> publish to TestPyPI
-# automatically -> publish to PyPI behind a GitHub Environment approval
-# gate. Authentication is PyPI Trusted Publishing (OIDC); no token is
-# stored in the repo.
+# automatically -> publish to PyPI. Authentication is PyPI Trusted
+# Publishing (OIDC); no token is stored in the repo.
+#
+# The `pypi` job names `environment: pypi`, which is NOT a manual gate
+# on its own. GitHub auto-creates an environment referenced by a
+# workflow with no protection rules attached, and none are configured
+# here, so a `firn-v*` tag publishes to real PyPI as soon as TestPyPI
+# succeeds. There is no approval step and no way to unpublish a version
+# once it lands. To add a gate, set required reviewers on the `pypi`
+# environment in Settings -> Environments. To check the current state
+# rather than trusting this comment:
+#
+#   gh api /repos/gordonmurray/firnflow/environments \
+#     --jq '.environments[]|"\(.name): rules=\([.protection_rules[]?.type]|join(","))"'
+#
+# An empty `rules=` means there is no gate.
 name: pypi-publish
 
 on:
