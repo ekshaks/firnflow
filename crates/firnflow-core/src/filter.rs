@@ -58,7 +58,12 @@ pub enum FilterCacheability {
     /// The predicate calls a function whose result can change
     /// between two otherwise-identical requests. Carries the
     /// function's name for logging.
-    Volatile {
+    ///
+    /// Named for the volatility level it excludes rather than the
+    /// one it implies. Calling it `Volatile` would suggest it covers
+    /// only `Volatility::Volatile`, when its most important member —
+    /// `now()` — is `Stable`; see the module docs.
+    NonImmutable {
         /// The first non-`Immutable` function found, by the name the
         /// planner resolved it to. `CURRENT_TIMESTAMP` reports as
         /// `now`, since that is what it plans to.
@@ -108,7 +113,7 @@ pub fn classify_filter(schema: SchemaRef, filter: &str) -> FilterCacheability {
     }));
     match planned {
         Ok(Ok(expr)) => match first_non_immutable_function(&expr) {
-            Some(function) => FilterCacheability::Volatile { function },
+            Some(function) => FilterCacheability::NonImmutable { function },
             None => FilterCacheability::Cacheable,
         },
         Ok(Err(_)) | Err(_) => FilterCacheability::Unplannable,
@@ -163,9 +168,9 @@ mod tests {
         classify_filter(schema(), filter)
     }
 
-    fn volatile_function(filter: &str) -> String {
+    fn non_immutable_function(filter: &str) -> String {
         match classify(filter) {
-            FilterCacheability::Volatile { function } => function,
+            FilterCacheability::NonImmutable { function } => function,
             other => panic!("expected {filter:?} to be volatile, got {other:?}"),
         }
     }
@@ -198,9 +203,9 @@ mod tests {
     /// would let every one of these through.
     #[test]
     fn stable_time_functions_are_not_cacheable() {
-        assert_eq!(volatile_function("_ingested_at < now()"), "now");
+        assert_eq!(non_immutable_function("_ingested_at < now()"), "now");
         assert_eq!(
-            volatile_function("_ingested_at < current_date"),
+            non_immutable_function("_ingested_at < current_date"),
             "current_date"
         );
     }
@@ -211,15 +216,21 @@ mod tests {
     /// for function names misses, so it is pinned separately.
     #[test]
     fn bare_current_timestamp_is_not_cacheable() {
-        assert_eq!(volatile_function("_ingested_at < CURRENT_TIMESTAMP"), "now");
-        assert_eq!(volatile_function("_ingested_at < current_timestamp"), "now");
+        assert_eq!(
+            non_immutable_function("_ingested_at < CURRENT_TIMESTAMP"),
+            "now"
+        );
+        assert_eq!(
+            non_immutable_function("_ingested_at < current_timestamp"),
+            "now"
+        );
     }
 
     /// `Volatile` functions, the case the obvious check does catch.
     #[test]
     fn volatile_functions_are_not_cacheable() {
-        assert_eq!(volatile_function("random() < 0.5"), "random");
-        assert_eq!(volatile_function("text != uuid()"), "uuid");
+        assert_eq!(non_immutable_function("random() < 0.5"), "random");
+        assert_eq!(non_immutable_function("text != uuid()"), "uuid");
     }
 
     /// A volatile call anywhere in the tree taints the whole
@@ -227,10 +238,13 @@ mod tests {
     /// function argument.
     #[test]
     fn volatility_is_detected_below_the_root() {
-        assert_eq!(volatile_function("id > 0 AND random() < 0.5"), "random");
-        assert_eq!(volatile_function("NOT (random() < 0.5)"), "random");
         assert_eq!(
-            volatile_function("_ingested_at < date_trunc('day', now())"),
+            non_immutable_function("id > 0 AND random() < 0.5"),
+            "random"
+        );
+        assert_eq!(non_immutable_function("NOT (random() < 0.5)"), "random");
+        assert_eq!(
+            non_immutable_function("_ingested_at < date_trunc('day', now())"),
             "now"
         );
     }

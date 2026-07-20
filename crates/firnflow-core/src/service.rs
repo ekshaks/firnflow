@@ -383,6 +383,15 @@ impl NamespaceService {
             self.cache
                 .populate_with_generation(ns, captured_generation, query_hash, bytes.clone());
         }
+        // Deliberately not gated on `exact_cacheable`: the sidecar
+        // never sees a filtered request at all. `semantic_eligible`
+        // requires `req.filter.is_none()`, and a filtered request
+        // that opts in is rejected outright by
+        // `validate_semantic_cache_request` at the top of this
+        // function. So there is no filtered path into the sidecar for
+        // the cacheability check to guard. Should the sidecar ever
+        // support filters, this needs the same gate as the exact
+        // cache above.
         if semantic_eligible {
             self.semantic.insert(
                 ns,
@@ -433,7 +442,7 @@ impl NamespaceService {
         };
         match classify_filter(schema, filter) {
             FilterCacheability::Cacheable => Ok(true),
-            FilterCacheability::Volatile { function } => {
+            FilterCacheability::NonImmutable { function } => {
                 tracing::debug!(
                     namespace = %ns,
                     function = %function,
