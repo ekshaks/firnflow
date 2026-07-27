@@ -697,10 +697,10 @@ impl Client {
 /// `$XDG_CACHE_HOME` or `~/.cache`; macOS: `~/Library/Caches`). Kept out
 /// of the data directory so the cache is never committed alongside data.
 fn platform_cache_base() -> Option<PathBuf> {
-    if let Ok(x) = std::env::var("XDG_CACHE_HOME") {
-        if !x.is_empty() {
-            return Some(PathBuf::from(x));
-        }
+    if let Ok(x) = std::env::var("XDG_CACHE_HOME")
+        && !x.is_empty()
+    {
+        return Some(PathBuf::from(x));
     }
     let home = std::env::var("HOME").ok()?;
     if cfg!(target_os = "macos") {
@@ -769,10 +769,10 @@ fn object_storage_options(
 /// bare `FIRNFLOW_S3_BUCKET` (mapped to `s3://bucket`).
 fn env_storage_url() -> Option<String> {
     for var in ["FIRN_STORAGE_URL", "FIRNFLOW_STORAGE_URI"] {
-        if let Ok(v) = std::env::var(var) {
-            if !v.trim().is_empty() {
-                return Some(v);
-            }
+        if let Ok(v) = std::env::var(var)
+            && !v.trim().is_empty()
+        {
+            return Some(v);
         }
     }
     std::env::var("FIRNFLOW_S3_BUCKET")

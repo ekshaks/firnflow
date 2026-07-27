@@ -292,11 +292,11 @@ impl CachingObjectStore {
                 if name.ends_with(".sz") {
                     continue;
                 }
-                if let Ok(meta) = ent.metadata() {
-                    if meta.is_file() {
-                        let mt = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                        found.push((name, meta.len(), mt));
-                    }
+                if let Ok(meta) = ent.metadata()
+                    && meta.is_file()
+                {
+                    let mt = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                    found.push((name, meta.len(), mt));
                 }
             }
         }

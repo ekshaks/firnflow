@@ -266,20 +266,20 @@ impl AuthConfig {
     /// `ISSUE_2.md` §1: if `admin_key` is unset, the write key
     /// authorises admin routes too.
     fn principal_for(&self, presented: &[u8]) -> Option<PrincipalKind> {
-        if let Some(k) = self.admin_key.as_ref() {
-            if k.ct_eq(presented) {
-                return Some(PrincipalKind::Admin);
-            }
+        if let Some(k) = self.admin_key.as_ref()
+            && k.ct_eq(presented)
+        {
+            return Some(PrincipalKind::Admin);
         }
-        if let Some(k) = self.write_key.as_ref() {
-            if k.ct_eq(presented) {
-                let kind = if self.admin_key.is_none() {
-                    PrincipalKind::Admin
-                } else {
-                    PrincipalKind::Write
-                };
-                return Some(kind);
-            }
+        if let Some(k) = self.write_key.as_ref()
+            && k.ct_eq(presented)
+        {
+            let kind = if self.admin_key.is_none() {
+                PrincipalKind::Admin
+            } else {
+                PrincipalKind::Write
+            };
+            return Some(kind);
         }
         None
     }
@@ -416,10 +416,8 @@ fn parse_bearer<B>(req: &Request<B>) -> Option<&str> {
 /// X-Forwarded-For path; default is to read peer IP from
 /// `ConnectInfo` only.
 pub fn peer_ip<B>(req: &Request<B>, trust_proxy_headers: bool) -> IpAddr {
-    if trust_proxy_headers {
-        if let Some(ip) = forwarded_ip(req) {
-            return ip;
-        }
+    if trust_proxy_headers && let Some(ip) = forwarded_ip(req) {
+        return ip;
     }
     req.extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -437,15 +435,15 @@ fn forwarded_ip<B>(req: &Request<B>) -> Option<IpAddr> {
             s.trim().parse().ok()
         }
     };
-    if let Some(v) = headers.get("x-forwarded-for") {
-        if let Some(ip) = try_parse(v, true) {
-            return Some(ip);
-        }
+    if let Some(v) = headers.get("x-forwarded-for")
+        && let Some(ip) = try_parse(v, true)
+    {
+        return Some(ip);
     }
-    if let Some(v) = headers.get("x-real-ip") {
-        if let Some(ip) = try_parse(v, false) {
-            return Some(ip);
-        }
+    if let Some(v) = headers.get("x-real-ip")
+        && let Some(ip) = try_parse(v, false)
+    {
+        return Some(ip);
     }
     None
 }

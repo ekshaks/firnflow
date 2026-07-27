@@ -167,20 +167,20 @@ fn gcs_storage_options() -> Option<HashMap<String, String>> {
 /// same env vars internally for its connect path.
 fn gcs_native_storage_options() -> Option<HashMap<String, String>> {
     let mut opts = HashMap::new();
-    if let Ok(v) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS") {
-        if !v.trim().is_empty() {
-            opts.insert("google_application_credentials".into(), v);
-        }
+    if let Ok(v) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
+        && !v.trim().is_empty()
+    {
+        opts.insert("google_application_credentials".into(), v);
     }
-    if let Ok(v) = std::env::var("GOOGLE_SERVICE_ACCOUNT_PATH") {
-        if !v.trim().is_empty() {
-            opts.insert("google_service_account_path".into(), v);
-        }
+    if let Ok(v) = std::env::var("GOOGLE_SERVICE_ACCOUNT_PATH")
+        && !v.trim().is_empty()
+    {
+        opts.insert("google_service_account_path".into(), v);
     }
-    if let Ok(v) = std::env::var("GOOGLE_SERVICE_ACCOUNT_KEY") {
-        if !v.trim().is_empty() {
-            opts.insert("google_service_account_key".into(), v);
-        }
+    if let Ok(v) = std::env::var("GOOGLE_SERVICE_ACCOUNT_KEY")
+        && !v.trim().is_empty()
+    {
+        opts.insert("google_service_account_key".into(), v);
     }
     if opts.is_empty() { None } else { Some(opts) }
 }

@@ -698,12 +698,12 @@ pub async fn list(
 
     // V1 only supports `_ingested_at`. User-column ordering is
     // gated behind scalar-index support, which is a separate issue.
-    if let Some(col) = params.order_by.as_deref() {
-        if col != LIST_ORDER_BY {
-            return Err(ApiError::Core(FirnflowError::InvalidRequest(format!(
-                "order_by must be {LIST_ORDER_BY:?} in v1, got {col:?}"
-            ))));
-        }
+    if let Some(col) = params.order_by.as_deref()
+        && col != LIST_ORDER_BY
+    {
+        return Err(ApiError::Core(FirnflowError::InvalidRequest(format!(
+            "order_by must be {LIST_ORDER_BY:?} in v1, got {col:?}"
+        ))));
     }
 
     let order = match params.order.as_deref().unwrap_or("desc") {

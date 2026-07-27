@@ -2207,10 +2207,10 @@ fn rows_to_batch(
 /// - `_relevance_score` for hybrid queries
 fn find_score_column(batch: &RecordBatch) -> Option<&Float32Array> {
     for name in [RELEVANCE_COLUMN, DISTANCE_COLUMN, SCORE_COLUMN] {
-        if let Some(col) = batch.column_by_name(name) {
-            if let Some(arr) = col.as_any().downcast_ref::<Float32Array>() {
-                return Some(arr);
-            }
+        if let Some(col) = batch.column_by_name(name)
+            && let Some(arr) = col.as_any().downcast_ref::<Float32Array>()
+        {
+            return Some(arr);
         }
     }
     None

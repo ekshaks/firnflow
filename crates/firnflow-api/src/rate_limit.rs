@@ -165,10 +165,10 @@ impl KeyExtractor for IpKeyExtractor {
     type Key = IpAddr;
 
     fn extract<B>(&self, req: &Request<B>) -> Result<Self::Key, GovernorError> {
-        if self.trust_proxy_headers {
-            if let Some(ip) = forwarded_ip(req) {
-                return Ok(ip);
-            }
+        if self.trust_proxy_headers
+            && let Some(ip) = forwarded_ip(req)
+        {
+            return Ok(ip);
         }
         let ip = req
             .extensions()
@@ -181,19 +181,17 @@ impl KeyExtractor for IpKeyExtractor {
 
 fn forwarded_ip<B>(req: &Request<B>) -> Option<IpAddr> {
     let headers = req.headers();
-    if let Some(v) = headers.get("x-forwarded-for") {
-        if let Ok(s) = v.to_str() {
-            if let Some(ip) = s.split(',').find_map(|p| p.trim().parse().ok()) {
-                return Some(ip);
-            }
-        }
+    if let Some(v) = headers.get("x-forwarded-for")
+        && let Ok(s) = v.to_str()
+        && let Some(ip) = s.split(',').find_map(|p| p.trim().parse().ok())
+    {
+        return Some(ip);
     }
-    if let Some(v) = headers.get("x-real-ip") {
-        if let Ok(s) = v.to_str() {
-            if let Ok(ip) = s.trim().parse() {
-                return Some(ip);
-            }
-        }
+    if let Some(v) = headers.get("x-real-ip")
+        && let Ok(s) = v.to_str()
+        && let Ok(ip) = s.trim().parse()
+    {
+        return Some(ip);
     }
     None
 }

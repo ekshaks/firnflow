@@ -820,7 +820,7 @@ fn default_num_partitions(rows: usize) -> u32 {
 fn default_num_sub_vectors(dim: usize) -> u32 {
     let target = (dim / 16).max(1);
     for candidate in (1..=target).rev() {
-        if dim % candidate == 0 {
+        if dim.is_multiple_of(candidate) {
             return candidate as u32;
         }
     }
