@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::{ConnectInfo, State};
-use axum::http::{header, HeaderValue, Request, StatusCode};
+use axum::http::{HeaderValue, Request, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::Response;
 use firnflow_core::CoreMetrics;
@@ -407,11 +407,7 @@ fn parse_bearer<B>(req: &Request<B>) -> Option<&str> {
     let token = s
         .strip_prefix("Bearer ")
         .or_else(|| s.strip_prefix("bearer "))?;
-    if token.is_empty() {
-        None
-    } else {
-        Some(token)
-    }
+    if token.is_empty() { None } else { Some(token) }
 }
 
 /// Extract the peer IP for synthetic `Principal::Anonymous` and

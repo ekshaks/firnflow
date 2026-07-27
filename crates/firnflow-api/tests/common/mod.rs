@@ -10,11 +10,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use firnflow_api::AppState;
 use firnflow_api::auth::{AuthConfig, Secret};
 use firnflow_api::config::AppConfig;
 use firnflow_api::operations::OperationRegistry;
 use firnflow_api::rate_limit::RateLimitSettings;
-use firnflow_api::AppState;
 use firnflow_core::cache::NamespaceCache;
 use firnflow_core::metrics::test_metrics;
 use firnflow_core::{NamespaceManager, NamespaceService, StorageRoot};

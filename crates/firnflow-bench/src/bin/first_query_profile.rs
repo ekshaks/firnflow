@@ -89,7 +89,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use firnflow_core::cache::NamespaceCache;
-use firnflow_core::object_cache::{build_cached_session, ObjectCacheConfig, ObjectCacheMetrics};
+use firnflow_core::object_cache::{ObjectCacheConfig, ObjectCacheMetrics, build_cached_session};
 use firnflow_core::{
     CoreMetrics, NamespaceId, NamespaceManager, NamespaceService, Scheme, StorageRoot, UpsertRow,
 };

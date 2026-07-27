@@ -30,12 +30,12 @@ use axum::response::IntoResponse;
 use firnflow_core::CoreMetrics;
 use governor::clock::QuantaInstant;
 use governor::middleware::NoOpMiddleware;
+use tower_governor::GovernorLayer;
 use tower_governor::errors::GovernorError;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::KeyExtractor;
-use tower_governor::GovernorLayer;
 
-use crate::auth::{rejection_reason, Principal};
+use crate::auth::{Principal, rejection_reason};
 use crate::error::ApiError;
 
 /// Knobs read from env at startup. `None` everywhere ⇒ both

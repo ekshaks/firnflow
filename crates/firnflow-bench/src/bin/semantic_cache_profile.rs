@@ -308,11 +308,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
     let denom = l2_norm(a) * l2_norm(b);
-    if denom == 0.0 {
-        0.0
-    } else {
-        dot(a, b) / denom
-    }
+    if denom == 0.0 { 0.0 } else { dot(a, b) / denom }
 }
 
 fn orthogonal_unit(base: &[f32], seed: usize) -> Vec<f32> {

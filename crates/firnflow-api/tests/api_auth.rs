@@ -8,7 +8,7 @@
 //! not reject and the handler ran.
 
 use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use firnflow_api::auth::{AuthConfig, Secret};
 use firnflow_api::config::AppConfig;
 use firnflow_api::rate_limit::RateLimitSettings;

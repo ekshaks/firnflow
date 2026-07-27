@@ -1052,7 +1052,7 @@ mod tests {
 
     #[tokio::test]
     async fn startup_scan_evicts_over_cap_oldest_first() {
-        use filetime::{set_file_mtime, FileTime};
+        use filetime::{FileTime, set_file_mtime};
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         // Three 100 KiB cache files; mtimes ascending so k1 is oldest. Total 300 KiB > 256 KiB cap.

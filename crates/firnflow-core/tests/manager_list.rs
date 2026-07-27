@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use firnflow_core::metrics::test_metrics;
 use firnflow_core::{
-    decode_list_cursor, ListOrder, ListRow, NamespaceId, NamespaceManager, StorageRoot, UpsertRow,
+    ListOrder, ListRow, NamespaceId, NamespaceManager, StorageRoot, UpsertRow, decode_list_cursor,
 };
 
 const DIM: usize = 4;

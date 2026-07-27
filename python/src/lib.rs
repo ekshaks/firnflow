@@ -277,13 +277,13 @@ fn parse_documents(documents: &Bound<'_, PyList>) -> PyResult<Vec<UpsertRow>> {
             (false, true) => {
                 return Err(ValidationError::new_err(
                     "document must set exactly one of 'vector' or 'vectors', not both",
-                ))
+                ));
             }
             (true, false) => {
                 return Err(ValidationError::new_err(
                     "document must include a 'vector' (list[float]) or 'vectors' \
                      (list[list[float]]); firn stores vectors with optional 'text'",
-                ))
+                ));
             }
             _ => {}
         }

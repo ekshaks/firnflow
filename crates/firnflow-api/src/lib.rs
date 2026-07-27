@@ -17,15 +17,15 @@ mod handlers;
 
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, post};
-use axum::Router;
 use tower::ServiceBuilder;
 
 pub use config::AppConfig;
 pub use error::ApiError;
-pub use state::{build_state, AppState};
+pub use state::{AppState, build_state};
 
 /// Build the axum router wired to the application state.
 ///

@@ -29,7 +29,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use firnflow_core::metrics::test_metrics;
-use firnflow_core::object_cache::{build_cached_session, ObjectCacheConfig, ObjectCacheMetrics};
+use firnflow_core::object_cache::{ObjectCacheConfig, ObjectCacheMetrics, build_cached_session};
 use firnflow_core::{NamespaceId, NamespaceManager, StorageRoot, UpsertRow};
 
 const DIM: usize = 128;

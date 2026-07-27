@@ -23,11 +23,11 @@ use bincode::config;
 use serde::Serialize;
 
 use crate::cache::{NamespaceCache, QueryHash, SemanticCache, SemanticLookup};
-use crate::filter::{classify_filter, FilterCacheability};
+use crate::filter::{FilterCacheability, classify_filter};
 use crate::manager::{CompactResult, NamespaceManager, UpsertRow};
 use crate::metrics::CoreMetrics;
 use crate::query::{
-    effective_semantic_threshold, validate_semantic_cache_request, QueryRequest, DEFAULT_NPROBES,
+    DEFAULT_NPROBES, QueryRequest, effective_semantic_threshold, validate_semantic_cache_request,
 };
 use crate::{FirnflowError, NamespaceId, QueryResultSet};
 

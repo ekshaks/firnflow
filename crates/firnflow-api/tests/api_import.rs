@@ -20,7 +20,7 @@ use arrow_array::builder::{FixedSizeListBuilder, Float32Builder};
 use arrow_array::{RecordBatch, UInt64Array};
 use arrow_ipc::writer::StreamWriter;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use firnflow_api::router;
 use serde_json::Value;

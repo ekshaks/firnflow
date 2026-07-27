@@ -20,8 +20,8 @@
 //! ```
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use arrow_array::{RecordBatch, RecordBatchIterator, RecordBatchReader, UInt32Array, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
@@ -182,11 +182,7 @@ fn gcs_native_storage_options() -> Option<HashMap<String, String>> {
             opts.insert("google_service_account_key".into(), v);
         }
     }
-    if opts.is_empty() {
-        None
-    } else {
-        Some(opts)
-    }
+    if opts.is_empty() { None } else { Some(opts) }
 }
 
 fn spaces_storage_options() -> Option<HashMap<String, String>> {

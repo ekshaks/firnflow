@@ -34,31 +34,31 @@
 //! reads on that same handle.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use arrow_array::builder::{FixedSizeListBuilder, Float32Builder, ListBuilder, StringBuilder};
 use arrow_array::{
-    new_null_array, Array, ArrayRef, FixedSizeListArray, Float32Array, ListArray, RecordBatch,
-    RecordBatchIterator, RecordBatchReader, StringArray, TimestampMicrosecondArray, UInt64Array,
+    Array, ArrayRef, FixedSizeListArray, Float32Array, ListArray, RecordBatch, RecordBatchIterator,
+    RecordBatchReader, StringArray, TimestampMicrosecondArray, UInt64Array, new_null_array,
 };
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef, TimeUnit};
 use dashmap::DashMap;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use lance::dataset::scanner::ColumnOrdering;
 use lance::dataset::{WriteMode, WriteParams};
+use lancedb::DistanceType;
 use lancedb::index::scalar::{BTreeIndexBuilder, FtsIndexBuilder, FullTextSearchQuery};
 use lancedb::index::vector::IvfPqIndexBuilder;
 use lancedb::index::{Index, IndexType};
 use lancedb::query::{ExecutableQuery, QueryBase, Select};
 use lancedb::table::{OptimizeAction, WriteOptions};
-use lancedb::DistanceType;
+use object_store::ObjectStore;
 use object_store::aws::AmazonS3Builder;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::local::LocalFileSystem;
 use object_store::path::Path as ObjectStorePath;
-use object_store::ObjectStore;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::metrics::CoreMetrics;

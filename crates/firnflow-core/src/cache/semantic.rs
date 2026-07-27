@@ -40,9 +40,9 @@ use std::sync::{Arc, Mutex};
 
 use dashmap::DashMap;
 
+use crate::NamespaceId;
 use crate::cache::invalidation::GenerationCounter;
 use crate::metrics::CoreMetrics;
-use crate::NamespaceId;
 
 /// Maximum number of cached query vectors retained per namespace.
 ///
