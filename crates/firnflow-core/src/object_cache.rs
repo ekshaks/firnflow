@@ -440,10 +440,9 @@ impl ObjectStore for CachingObjectStore {
         // single-flight: serialize concurrent identical misses, then self-clean.
         let gate = self.inflight_lock(&key);
         let _g = gate.lock().await;
-        let out = if let Some(hit) = self.disk_hit(&key, &path, location, range).await {
-            Ok(hit)
-        } else {
-            self.fetch_and_cache(location, options, &key, &path).await
+        let out = match self.disk_hit(&key, &path, location, range).await {
+            Some(hit) => Ok(hit),
+            None => self.fetch_and_cache(location, options, &key, &path).await,
         };
         drop(_g);
         self.release_inflight(&key, &gate);

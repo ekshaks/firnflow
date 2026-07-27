@@ -349,7 +349,7 @@ mod tests {
 
     /// Build an env lookup closure backed by a fixed map, so the
     /// region-precedence tests never touch process-global env state.
-    fn env_lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+    fn env_lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
         let map: HashMap<String, String> = pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
