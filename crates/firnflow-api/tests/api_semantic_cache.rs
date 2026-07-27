@@ -14,10 +14,10 @@
 //! Gated `#[ignore]`: needs MinIO up via `docker compose up -d minio
 //! minio-init`.
 
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use firnflow_api::router;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 mod common;
@@ -201,10 +201,12 @@ async fn api_semantic_cache_threshold_range_returns_400() {
     });
     let (status, payload) = post_json(app, format!("/ns/{ns}/query"), body).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(payload["error"]
-        .as_str()
-        .unwrap()
-        .contains("min_similarity"));
+    assert!(
+        payload["error"]
+            .as_str()
+            .unwrap()
+            .contains("min_similarity")
+    );
 }
 
 #[tokio::test]

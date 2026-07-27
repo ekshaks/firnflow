@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The workspace builds on the Rust 2024 edition, and the declared minimum toolchain moves from 1.85 to 1.91. The 1.85 floor was already wrong: the exact-pinned `lance` 6.0.0 and `lancedb` 0.29.0 line needs 1.91 to compile, so the manifest was understating what a build already required. This is a build-level change: the REST API, the wire formats, and the Python API all behave exactly as before, and CI and the release images were on 1.94 either way.
+
 ## [0.9.4] - 2026-07-20
 
 ### Fixed

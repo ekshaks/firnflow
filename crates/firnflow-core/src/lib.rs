@@ -20,18 +20,18 @@ pub mod storage_root;
 pub mod vector;
 
 pub use error::FirnflowError;
-pub use filter::{classify_filter, FilterCacheability};
+pub use filter::{FilterCacheability, classify_filter};
 pub use manager::{
-    decode_list_cursor, encode_list_cursor, validate_arrow_import_schema,
-    validate_scalar_index_column, CompactResult, NamespaceManager, UpsertRow, LIST_MAX_LIMIT,
+    CompactResult, LIST_MAX_LIMIT, NamespaceManager, UpsertRow, decode_list_cursor,
+    encode_list_cursor, validate_arrow_import_schema, validate_scalar_index_column,
 };
 pub use metrics::CoreMetrics;
 pub use namespace::NamespaceId;
 pub use query::{
+    DEFAULT_SEMANTIC_MIN_SIMILARITY, IndexRequest, QueryRequest, SemanticCacheRequest,
     effective_semantic_threshold, validate_ivf_pq_options, validate_semantic_cache_request,
-    IndexRequest, QueryRequest, SemanticCacheRequest, DEFAULT_SEMANTIC_MIN_SIMILARITY,
 };
 pub use result::{ListOrder, ListPage, ListRow, NamespaceInfo, QueryResult, QueryResultSet};
 pub use service::{NamespaceService, QueryCacheSource, QueryOutcome};
-pub use storage_root::{resolve_s3_region, Scheme, StorageRoot};
+pub use storage_root::{Scheme, StorageRoot, resolve_s3_region};
 pub use vector::VectorKind;

@@ -20,19 +20,19 @@ use std::sync::Arc;
 
 use arrow_array::RecordBatchReader;
 use arrow_ipc::reader::StreamReader;
+use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use firnflow_core::{
-    decode_list_cursor, validate_arrow_import_schema, FirnflowError, IndexRequest, ListOrder,
-    ListPage, NamespaceId, NamespaceInfo, QueryRequest, UpsertRow as CoreUpsertRow, LIST_MAX_LIMIT,
+    FirnflowError, IndexRequest, LIST_MAX_LIMIT, ListOrder, ListPage, NamespaceId, NamespaceInfo,
+    QueryRequest, UpsertRow as CoreUpsertRow, decode_list_cursor, validate_arrow_import_schema,
 };
 
 use crate::error::ApiError;
@@ -698,12 +698,12 @@ pub async fn list(
 
     // V1 only supports `_ingested_at`. User-column ordering is
     // gated behind scalar-index support, which is a separate issue.
-    if let Some(col) = params.order_by.as_deref() {
-        if col != LIST_ORDER_BY {
-            return Err(ApiError::Core(FirnflowError::InvalidRequest(format!(
-                "order_by must be {LIST_ORDER_BY:?} in v1, got {col:?}"
-            ))));
-        }
+    if let Some(col) = params.order_by.as_deref()
+        && col != LIST_ORDER_BY
+    {
+        return Err(ApiError::Core(FirnflowError::InvalidRequest(format!(
+            "order_by must be {LIST_ORDER_BY:?} in v1, got {col:?}"
+        ))));
     }
 
     let order = match params.order.as_deref().unwrap_or("desc") {

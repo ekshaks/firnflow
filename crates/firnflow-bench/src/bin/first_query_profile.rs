@@ -89,7 +89,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use firnflow_core::cache::NamespaceCache;
-use firnflow_core::object_cache::{build_cached_session, ObjectCacheConfig, ObjectCacheMetrics};
+use firnflow_core::object_cache::{ObjectCacheConfig, ObjectCacheMetrics, build_cached_session};
 use firnflow_core::{
     CoreMetrics, NamespaceId, NamespaceManager, NamespaceService, Scheme, StorageRoot, UpsertRow,
 };
@@ -683,10 +683,10 @@ fn read_s3_requests(metrics: &CoreMetrics, ns: &NamespaceId) -> u64 {
         if !line.contains(&needle_ns) {
             continue;
         }
-        if let Some(value_str) = line.rsplit_once(char::is_whitespace).map(|(_, v)| v) {
-            if let Ok(v) = value_str.parse::<f64>() {
-                total = total.saturating_add(v as u64);
-            }
+        if let Some(value_str) = line.rsplit_once(char::is_whitespace).map(|(_, v)| v)
+            && let Ok(v) = value_str.parse::<f64>()
+        {
+            total = total.saturating_add(v as u64);
         }
     }
     total

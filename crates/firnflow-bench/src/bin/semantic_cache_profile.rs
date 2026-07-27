@@ -308,11 +308,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
     let denom = l2_norm(a) * l2_norm(b);
-    if denom == 0.0 {
-        0.0
-    } else {
-        dot(a, b) / denom
-    }
+    if denom == 0.0 { 0.0 } else { dot(a, b) / denom }
 }
 
 fn orthogonal_unit(base: &[f32], seed: usize) -> Vec<f32> {
@@ -824,7 +820,7 @@ fn default_num_partitions(rows: usize) -> u32 {
 fn default_num_sub_vectors(dim: usize) -> u32 {
     let target = (dim / 16).max(1);
     for candidate in (1..=target).rev() {
-        if dim % candidate == 0 {
+        if dim.is_multiple_of(candidate) {
             return candidate as u32;
         }
     }

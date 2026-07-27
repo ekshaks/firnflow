@@ -18,7 +18,7 @@
 //! `s3://foo` and a bare `foo` agree) and that `gs://` URIs round
 //! through to the GCS scheme cleanly.
 
-use firnflow_api::config::{resolve_storage_root, ResolvedStorageRoot};
+use firnflow_api::config::{ResolvedStorageRoot, resolve_storage_root};
 use firnflow_core::StorageRoot;
 
 fn expect_ok(uri: Option<&str>, bucket: Option<&str>) -> ResolvedStorageRoot {

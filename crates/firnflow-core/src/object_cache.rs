@@ -292,11 +292,11 @@ impl CachingObjectStore {
                 if name.ends_with(".sz") {
                     continue;
                 }
-                if let Ok(meta) = ent.metadata() {
-                    if meta.is_file() {
-                        let mt = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                        found.push((name, meta.len(), mt));
-                    }
+                if let Ok(meta) = ent.metadata()
+                    && meta.is_file()
+                {
+                    let mt = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                    found.push((name, meta.len(), mt));
                 }
             }
         }
@@ -440,10 +440,9 @@ impl ObjectStore for CachingObjectStore {
         // single-flight: serialize concurrent identical misses, then self-clean.
         let gate = self.inflight_lock(&key);
         let _g = gate.lock().await;
-        let out = if let Some(hit) = self.disk_hit(&key, &path, location, range).await {
-            Ok(hit)
-        } else {
-            self.fetch_and_cache(location, options, &key, &path).await
+        let out = match self.disk_hit(&key, &path, location, range).await {
+            Some(hit) => Ok(hit),
+            None => self.fetch_and_cache(location, options, &key, &path).await,
         };
         drop(_g);
         self.release_inflight(&key, &gate);
@@ -1053,7 +1052,7 @@ mod tests {
 
     #[tokio::test]
     async fn startup_scan_evicts_over_cap_oldest_first() {
-        use filetime::{set_file_mtime, FileTime};
+        use filetime::{FileTime, set_file_mtime};
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         // Three 100 KiB cache files; mtimes ascending so k1 is oldest. Total 300 KiB > 256 KiB cap.

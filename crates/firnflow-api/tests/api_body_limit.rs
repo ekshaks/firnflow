@@ -12,7 +12,7 @@
 //! deserialises cleanly into `{ queries: [] }` and returns 202
 //! without touching the namespace manager or any object store.
 
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use firnflow_api::router;
 use serde_json::json;

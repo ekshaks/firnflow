@@ -8,7 +8,7 @@
 //! replenish between consecutive calls inside a single test.
 
 use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use firnflow_api::auth::{AuthConfig, Secret};
 use firnflow_api::rate_limit::RateLimitSettings;
 use firnflow_api::router;

@@ -9,8 +9,11 @@ members = [
 
 [workspace.package]
 version = "0.9.4"
-edition = "2021"
-rust-version = "1.85"
+edition = "2024"
+# The 2024 edition itself only needs 1.85, but the exact-pinned
+# lance 6.0.0 / lancedb 0.29.0 line requires 1.91, so that is the
+# real floor for building this workspace.
+rust-version = "1.91"
 license = "Apache-2.0"
 
 [workspace.dependencies]

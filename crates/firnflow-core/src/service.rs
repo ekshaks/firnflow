@@ -23,11 +23,11 @@ use bincode::config;
 use serde::Serialize;
 
 use crate::cache::{NamespaceCache, QueryHash, SemanticCache, SemanticLookup};
-use crate::filter::{classify_filter, FilterCacheability};
+use crate::filter::{FilterCacheability, classify_filter};
 use crate::manager::{CompactResult, NamespaceManager, UpsertRow};
 use crate::metrics::CoreMetrics;
 use crate::query::{
-    effective_semantic_threshold, validate_semantic_cache_request, QueryRequest, DEFAULT_NPROBES,
+    DEFAULT_NPROBES, QueryRequest, effective_semantic_threshold, validate_semantic_cache_request,
 };
 use crate::{FirnflowError, NamespaceId, QueryResultSet};
 
@@ -314,50 +314,50 @@ impl NamespaceService {
                 .record_semantic_cache_rejection(ns, "unsupported_query_shape");
         }
 
-        if let Some(sem) = semantic_opt {
-            if semantic_eligible {
-                let threshold = effective_semantic_threshold(sem);
-                match self.semantic.lookup(
-                    ns,
-                    &req.vector,
-                    req.k,
-                    nprobes_resolved,
-                    req.include_vector,
-                    threshold,
-                ) {
-                    // Same decode-failure handling as the exact cache:
-                    // unreadable bytes degrade to a miss and the
-                    // backend repopulates both layers below.
-                    SemanticLookup::Hit { bytes, .. } => match decode_payload(&bytes) {
-                        Ok(decoded) => {
-                            self.metrics.record_semantic_cache_hit(ns);
-                            self.metrics.record_query(
-                                ns,
-                                classify_query_type(req),
-                                start.elapsed().as_secs_f64(),
-                            );
-                            return Ok(QueryOutcome {
-                                result: decoded,
-                                cache_source: QueryCacheSource::SemanticCache,
-                            });
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                namespace = %ns,
-                                error = %e,
-                                "semantic-cache payload failed to decode; \
-                                 treating as a miss and re-running the query"
-                            );
-                            self.metrics.record_semantic_cache_miss(ns);
-                        }
-                    },
-                    SemanticLookup::Miss => {
+        if let Some(sem) = semantic_opt
+            && semantic_eligible
+        {
+            let threshold = effective_semantic_threshold(sem);
+            match self.semantic.lookup(
+                ns,
+                &req.vector,
+                req.k,
+                nprobes_resolved,
+                req.include_vector,
+                threshold,
+            ) {
+                // Same decode-failure handling as the exact cache:
+                // unreadable bytes degrade to a miss and the
+                // backend repopulates both layers below.
+                SemanticLookup::Hit { bytes, .. } => match decode_payload(&bytes) {
+                    Ok(decoded) => {
+                        self.metrics.record_semantic_cache_hit(ns);
+                        self.metrics.record_query(
+                            ns,
+                            classify_query_type(req),
+                            start.elapsed().as_secs_f64(),
+                        );
+                        return Ok(QueryOutcome {
+                            result: decoded,
+                            cache_source: QueryCacheSource::SemanticCache,
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            namespace = %ns,
+                            error = %e,
+                            "semantic-cache payload failed to decode; \
+                             treating as a miss and re-running the query"
+                        );
                         self.metrics.record_semantic_cache_miss(ns);
                     }
-                    SemanticLookup::EmptyIndex => {
-                        self.metrics
-                            .record_semantic_cache_rejection(ns, "empty_index");
-                    }
+                },
+                SemanticLookup::Miss => {
+                    self.metrics.record_semantic_cache_miss(ns);
+                }
+                SemanticLookup::EmptyIndex => {
+                    self.metrics
+                        .record_semantic_cache_rejection(ns, "empty_index");
                 }
             }
         }

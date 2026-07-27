@@ -131,11 +131,11 @@ fn first_non_immutable_function(expr: &Expr) -> Option<String> {
     // `Expr::apply` only returns an error if the closure does, and
     // this one cannot, so the result carries no information.
     let _ = expr.apply(|node| {
-        if let Expr::ScalarFunction(call) = node {
-            if !matches!(call.func.signature().volatility, Volatility::Immutable) {
-                found = Some(call.func.name().to_string());
-                return Ok(TreeNodeRecursion::Stop);
-            }
+        if let Expr::ScalarFunction(call) = node
+            && !matches!(call.func.signature().volatility, Volatility::Immutable)
+        {
+            found = Some(call.func.name().to_string());
+            return Ok(TreeNodeRecursion::Stop);
         }
         Ok(TreeNodeRecursion::Continue)
     });

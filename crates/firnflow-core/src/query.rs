@@ -142,12 +142,12 @@ pub fn validate_semantic_cache_request(req: &QueryRequest) -> Result<(), crate::
     let Some(sem) = req.semantic_cache.as_ref() else {
         return Ok(());
     };
-    if let Some(threshold) = sem.min_similarity {
-        if !threshold.is_finite() || threshold <= 0.0 || threshold > 1.0 {
-            return Err(crate::FirnflowError::InvalidRequest(format!(
-                "semantic_cache.min_similarity must be in (0.0, 1.0], got {threshold}"
-            )));
-        }
+    if let Some(threshold) = sem.min_similarity
+        && (!threshold.is_finite() || threshold <= 0.0 || threshold > 1.0)
+    {
+        return Err(crate::FirnflowError::InvalidRequest(format!(
+            "semantic_cache.min_similarity must be in (0.0, 1.0], got {threshold}"
+        )));
     }
     if !sem.enabled {
         return Ok(());
@@ -235,14 +235,13 @@ pub fn validate_ivf_pq_options(
                 "num_bits={bits} is not supported; accepted values are 4 or 8"
             )));
         }
-        if bits == 4 {
-            if let Some(n) = num_sub_vectors {
-                if n % 2 != 0 {
-                    return Err(crate::FirnflowError::InvalidRequest(format!(
-                        "num_bits=4 requires num_sub_vectors to be even (got {n})"
-                    )));
-                }
-            }
+        if bits == 4
+            && let Some(n) = num_sub_vectors
+            && n % 2 != 0
+        {
+            return Err(crate::FirnflowError::InvalidRequest(format!(
+                "num_bits=4 requires num_sub_vectors to be even (got {n})"
+            )));
         }
     }
     Ok(())
