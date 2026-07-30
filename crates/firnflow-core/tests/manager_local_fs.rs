@@ -323,3 +323,220 @@ async fn local_fs_delete_removes_namespace_objects() {
         "delete should remove at least one object, got {deleted}"
     );
 }
+
+#[tokio::test]
+async fn local_fs_text_query_without_fts_index_is_a_bad_request() {
+    // Regression for #103. Firn sends `text` to Lance without naming a
+    // column, so Lance resolves the target from the FTS-indexed columns
+    // and fails plan building when there are none. That reached callers
+    // as a 500, which reads as a storage fault and invites a retry that
+    // can never succeed.
+    let dir = TempDir::new().unwrap();
+    let manager = local_manager(&dir);
+    let ns = NamespaceId::new("embedded-fts-unindexed").unwrap();
+
+    let rows: Vec<UpsertRow> = vec![
+        UpsertRow {
+            id: 1,
+            vector: unit_vector(0),
+            vectors: None,
+            text: Some("the quick brown fox".into()),
+        },
+        UpsertRow {
+            id: 2,
+            vector: unit_vector(1),
+            vectors: None,
+            text: Some("a lazy dog sleeps".into()),
+        },
+    ];
+    manager.upsert(&ns, rows).await.expect("local upsert");
+
+    // Deliberately no `create_fts_index` call.
+
+    let expect_missing_index = |err: FirnflowError, case: &str| match err {
+        FirnflowError::InvalidRequest(msg) => {
+            assert!(
+                msg.contains("BM25 index") && msg.contains("/fts-index"),
+                "{case}: error must name the index and how to build it, got {msg}"
+            );
+        }
+        other => panic!("{case}: expected InvalidRequest, got {other:?}"),
+    };
+
+    // FTS-only.
+    let err = manager
+        .query(
+            &ns,
+            Vec::new(),
+            None,
+            10,
+            None,
+            Some("fox".into()),
+            None,
+            false,
+        )
+        .await
+        .expect_err("FTS-only without an index must fail");
+    expect_missing_index(err, "fts-only");
+
+    // Hybrid. The vector leg would succeed on its own, so this proves
+    // the error is not swallowed by the fusion path.
+    let err = manager
+        .query(
+            &ns,
+            unit_vector(0),
+            None,
+            10,
+            None,
+            Some("fox".into()),
+            None,
+            false,
+        )
+        .await
+        .expect_err("hybrid without an FTS index must fail");
+    expect_missing_index(err, "hybrid");
+
+    // Filtered text query. This one already returned InvalidRequest
+    // before the fix, but blamed the `filter` for a fault that has
+    // nothing to do with it, so assert on the message, not the variant.
+    let err = manager
+        .query(
+            &ns,
+            Vec::new(),
+            None,
+            10,
+            None,
+            Some("fox".into()),
+            Some("id > 0".into()),
+            false,
+        )
+        .await
+        .expect_err("filtered FTS without an index must fail");
+    expect_missing_index(err, "filtered fts");
+
+    // Vector-only is unaffected. The probe must not fire on a query
+    // that carries no text.
+    let results = manager
+        .query(&ns, unit_vector(0), None, 10, None, None, None, false)
+        .await
+        .expect("vector-only query must still succeed without an FTS index");
+    assert_eq!(
+        results.results.len(),
+        2,
+        "vector-only must return both rows"
+    );
+
+    // Building the index clears all three failures: the probe reports
+    // what is actually true rather than rejecting every text query.
+    manager
+        .create_fts_index(&ns)
+        .await
+        .expect("create fts index");
+    let results = manager
+        .query(
+            &ns,
+            Vec::new(),
+            None,
+            10,
+            None,
+            Some("fox".into()),
+            None,
+            false,
+        )
+        .await
+        .expect("FTS query must succeed once the index exists");
+    let ids: Vec<u64> = results.results.iter().map(|r| r.id).collect();
+    assert_eq!(ids, vec![1], "'fox' should match only row 1, got {ids:?}");
+}
+
+#[tokio::test]
+async fn local_fs_text_query_on_unwritten_namespace_is_empty_not_an_error() {
+    // The other half of #103: a namespace that has never been written
+    // has no table to index, so a text query against it returns an
+    // empty result set rather than the missing-index error. That is why
+    // a fresh deployment looks healthy right up until the first write.
+    let dir = TempDir::new().unwrap();
+    let manager = local_manager(&dir);
+    let ns = NamespaceId::new("embedded-fts-unwritten").unwrap();
+
+    // Every query shape, since that is what the docs promise. The
+    // vector legs matter as much as the text ones, because an unwritten
+    // namespace has no dimension to validate a query vector against.
+    for (case, vector, text) in [
+        ("fts-only", Vec::new(), Some("fox".to_string())),
+        ("hybrid", unit_vector(0), Some("fox".to_string())),
+        ("vector-only", unit_vector(0), None),
+    ] {
+        let results = manager
+            .query(&ns, vector, None, 10, None, text, None, false)
+            .await
+            .unwrap_or_else(|e| panic!("{case} on an unwritten namespace must not error: {e}"));
+        assert!(
+            results.results.is_empty(),
+            "{case}: unwritten namespace must return no hits"
+        );
+    }
+}
+
+#[tokio::test]
+async fn local_fs_fts_index_covers_rows_written_after_the_build() {
+    // Raised alongside #103, and worth locking down rather than taking
+    // on trust: the BTree on `id` only covers rows present at build
+    // time until a compaction folds the rest in, so it is not obvious
+    // the inverted index behaves differently. It does: Lance scans the
+    // fragments the index does not cover and merges the scores, so a
+    // term that appears only in a post-build row is still found.
+    let dir = TempDir::new().unwrap();
+    let manager = local_manager(&dir);
+    let ns = NamespaceId::new("embedded-fts-post-build").unwrap();
+
+    manager
+        .upsert(
+            &ns,
+            vec![UpsertRow {
+                id: 1,
+                vector: unit_vector(0),
+                vectors: None,
+                text: Some("the quick brown fox".into()),
+            }],
+        )
+        .await
+        .expect("first upsert");
+    manager
+        .create_fts_index(&ns)
+        .await
+        .expect("create fts index");
+
+    manager
+        .upsert(
+            &ns,
+            vec![UpsertRow {
+                id: 2,
+                vector: unit_vector(1),
+                vectors: None,
+                text: Some("a solitary aardvark".into()),
+            }],
+        )
+        .await
+        .expect("post-build upsert");
+
+    let results = manager
+        .query(
+            &ns,
+            Vec::new(),
+            None,
+            10,
+            None,
+            Some("aardvark".into()),
+            None,
+            false,
+        )
+        .await
+        .expect("fts query");
+    let ids: Vec<u64> = results.results.iter().map(|r| r.id).collect();
+    assert_eq!(
+        ids,
+        vec![2],
+        "a term only in the post-build row must still be found, got {ids:?}"
+    );
+}

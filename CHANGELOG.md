@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A full-text or hybrid query against a namespace that has rows but no BM25 index returns `400` naming the missing index and the endpoint that builds it, instead of `500`. Firn sends the query text to LanceDB without naming a column, so LanceDB resolves the target from the set of indexed text columns and fails to plan the query when there are none. That surfaced as a generic internal error, which is indistinguishable from a storage or IO failure, so a client with retry logic would spend its whole backoff budget on a request that could not succeed until an index was built. The check reads the namespace's index metadata rather than matching the message text of the underlying error, and runs only after a query has already failed, so a succeeding query costs nothing extra. Hybrid requests fail rather than quietly falling back to vector-only ranking, so a missing index can never show up as an unexplained change in result quality. A namespace that has never been written keeps returning an empty `200`, since it has no table to index. This also settles an inconsistency where the same fault answered `400` or `500` depending on whether the request happened to carry an unrelated `filter`, and blamed the filter when it did. Closes #103.
+
 ### Changed
 - The workspace builds on the Rust 2024 edition, and the declared minimum toolchain moves from 1.85 to 1.91. The 1.85 floor was already wrong: the exact-pinned `lance` 6.0.0 and `lancedb` 0.29.0 line needs 1.91 to compile, so the manifest was understating what a build already required. This is a build-level change: the REST API, the wire formats, and the Python API all behave exactly as before, and CI and the release images were on 1.94 either way.
 

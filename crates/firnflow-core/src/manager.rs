@@ -999,6 +999,13 @@ impl NamespaceManager {
     /// whose shape does not match the namespace's kind returns 400
     /// with the expected shape named in the error.
     ///
+    /// Any query carrying `text` needs a BM25 index on the namespace;
+    /// without one, both the FTS-only and hybrid shapes return
+    /// [`FirnflowError::InvalidRequest`] naming the index and the
+    /// endpoint that builds it. A namespace that has never been written
+    /// has no table to index and keeps returning an empty result set
+    /// rather than an error.
+    ///
     /// `nprobes` controls how many IVF partitions are searched for
     /// vector queries. Defaults to [`DEFAULT_NPROBES`] (20).
     ///
@@ -1119,7 +1126,7 @@ impl NamespaceManager {
             Some(cols)
         };
 
-        let stream = if let Some(shape) = shape {
+        let stream_result = if let Some(shape) = shape {
             // Vector-only or hybrid (lancedb auto-detects hybrid when
             // both nearest_to and full_text_search are set). The
             // shape of the query call depends on the namespace kind:
@@ -1166,7 +1173,7 @@ impl NamespaceManager {
             if let Some(ref cols) = projection {
                 vq = vq.select(Select::columns(cols));
             }
-            execute_query(vq.execute(), filter.is_some(), "query.execute").await?
+            execute_query(vq.execute(), filter.is_some(), "query.execute").await
         } else {
             // FTS-only
             let t = text.unwrap();
@@ -1180,7 +1187,16 @@ impl NamespaceManager {
             if let Some(ref cols) = projection {
                 q = q.select(Select::columns(cols));
             }
-            execute_query(q.execute(), filter.is_some(), "fts.execute").await?
+            execute_query(q.execute(), filter.is_some(), "fts.execute").await
+        };
+
+        // A text query against a namespace with no BM25 index cannot
+        // succeed, whatever else went wrong on this attempt, so trade
+        // the raw backend error for one that names the missing index.
+        let stream = match stream_result {
+            Ok(stream) => stream,
+            Err(err) if has_text => return Err(self.explain_text_query_error(ns, &tbl, err).await),
+            Err(err) => return Err(err),
         };
 
         let batches: Vec<RecordBatch> = stream
@@ -1195,6 +1211,69 @@ impl NamespaceManager {
         })
     }
 
+    /// Turn a failed full-text or hybrid query into an error that names
+    /// the missing BM25 index, when that is what actually went wrong.
+    ///
+    /// Firn sends `text` to Lance without naming a column, so Lance
+    /// resolves the target from the set of FTS-indexed columns. On a
+    /// namespace with no such index that set is empty and plan building
+    /// fails with a `lance::Error::InvalidInput`, a caller-fixable
+    /// condition that would otherwise reach the client as a 500,
+    /// indistinguishable from a storage failure and equally
+    /// indistinguishable from something worth retrying (it is not).
+    ///
+    /// The decision comes from the namespace's index metadata rather
+    /// than from matching Lance's message text, which shifts across
+    /// releases. It costs a `list_indices` round-trip, but only on a
+    /// query that has already failed, so the succeeding path pays
+    /// nothing. When the probe itself fails, or an index does exist and
+    /// the failure was something else entirely, the original error
+    /// passes through untouched.
+    ///
+    /// Applies to both query shapes and both cache-eligibility paths: a
+    /// filtered text query previously reported this as a bad predicate
+    /// (via `classify_filter_error`, which classifies the same
+    /// `InvalidInput`), blaming the `filter` for a fault that has
+    /// nothing to do with it.
+    ///
+    /// Deliberately not conditioned on the shape of the failure. It
+    /// looks unsafe to answer 400 when the query might have failed on a
+    /// transient object-store timeout instead, but with no index on the
+    /// text column a query carrying `text` cannot succeed on any
+    /// attempt, since Lance re-resolves the target column on every
+    /// plan build, so the client error is the terminal answer and a retry
+    /// really is futile. The caveat is a pooled handle pinned to a
+    /// table version older than a *sibling replica's* index build,
+    /// which would report an index that exists as missing. That is the
+    /// general read-staleness behaviour of a pooled handle rather than
+    /// anything this path introduces, and it replaces a wrong 500 with
+    /// a wrong 400 that at least names something actionable.
+    async fn explain_text_query_error(
+        &self,
+        ns: &NamespaceId,
+        tbl: &lancedb::Table,
+        err: FirnflowError,
+    ) -> FirnflowError {
+        let Ok(indices) = tbl.list_indices().await else {
+            return err;
+        };
+        // Match the column too, not just the index kind. Firn only ever
+        // builds FTS on `text`, so today the two are equivalent. But
+        // the query resolves its target column from whatever text
+        // columns are indexed, so an index on some other column is not
+        // the one this query needed.
+        let indexed = indices
+            .iter()
+            .any(|i| i.index_type == IndexType::FTS && i.columns.iter().any(|c| c == "text"));
+        if indexed {
+            return err;
+        }
+        FirnflowError::InvalidRequest(format!(
+            "full-text search requires a BM25 index on namespace {ns}; \
+             build one with POST /ns/{ns}/fts-index"
+        ))
+    }
+
     /// Build an IVF_PQ index on the namespace's vector column.
     ///
     /// This is a potentially expensive operation — minutes for large
@@ -1202,9 +1281,16 @@ impl NamespaceManager {
     /// running it in a background task if non-blocking behaviour is
     /// desired.
     ///
-    /// Index build does **not** invalidate the cache — cached query
-    /// results are still correct post-build. See PHASE6_PLAN.md §
-    /// "Cache invalidation and index rebuild" for the rationale.
+    /// Building an index makes previously cached results for this
+    /// namespace unreachable, even though the rows themselves have not
+    /// changed and those results are still correct. The cache
+    /// generation is derived from the Lance table version (see
+    /// [`Self::generation`]), a build commits a new manifest, and every
+    /// cache key carries the generation, so the entries are not
+    /// evicted so much as stranded, and the next query repopulates at
+    /// the new generation. The cost is one round of cache misses per
+    /// namespace per index build, which is the accepted price of
+    /// deriving the generation from something that survives a restart.
     pub async fn create_index(
         &self,
         ns: &NamespaceId,
