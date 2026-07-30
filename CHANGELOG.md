@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-07-30
+
 ### Fixed
 - A full-text or hybrid query against a namespace that has rows but no BM25 index returns `400` naming the missing index and the endpoint that builds it, instead of `500`. Firn sends the query text to LanceDB without naming a column, so LanceDB resolves the target from the set of indexed text columns and fails to plan the query when there are none. That surfaced as a generic internal error, which is indistinguishable from a storage or IO failure, so a client with retry logic would spend its whole backoff budget on a request that could not succeed until an index was built. The check reads the namespace's index metadata rather than matching the message text of the underlying error, and runs only after a query has already failed, so a succeeding query costs nothing extra. Hybrid requests fail rather than quietly falling back to vector-only ranking, so a missing index can never show up as an unexplained change in result quality. A namespace that has never been written keeps returning an empty `200`, since it has no table to index. This also settles an inconsistency where the same fault answered `400` or `500` depending on whether the request happened to carry an unrelated `filter`, and blamed the filter when it did. Closes #103.
 
@@ -240,7 +242,8 @@ development through phases 1 through 8 before being made public;
   benchmark at dim=1536, 100k rows available at
   `bench/results/cold_vs_warm_aws.md`.
 
-[Unreleased]: https://github.com/gordonmurray/firnflow/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/gordonmurray/firnflow/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/gordonmurray/firnflow/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/gordonmurray/firnflow/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/gordonmurray/firnflow/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/gordonmurray/firnflow/compare/v0.9.1...v0.9.2
