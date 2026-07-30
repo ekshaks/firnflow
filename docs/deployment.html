@@ -107,7 +107,40 @@ FIRNFLOW_S3_SECRET_KEY=minioadmin \
 
     <div class="callout callout-info">
       <div class="callout-title">NVMe cache volume</div>
-      Mount a fast local SSD at <code>/var/lib/firnflow/cache</code> for the NVMe tier. The cache is ephemeral: losing it only means cache misses until it warms up again. For best performance, use a <code>tmpfs</code> or NVMe-backed volume.
+      Mount a fast local SSD at <code>/var/lib/firnflow/cache</code> for the NVMe tier, which is where the container image points <code>FIRNFLOW_CACHE_NVME_PATH</code>. Note that this overrides the <code>/tmp/firnflow-cache</code> default the server itself uses, so the path to mount comes from the image, not from the binary's default. The cache is ephemeral: losing it only means cache misses until it warms up again. For best performance, use a <code>tmpfs</code> or NVMe-backed volume.
+    </div>
+
+    <h2>Writable directories</h2>
+    <p>Firn writes to two local directories, and both must be writable by the user the server runs as. Neither is optional in the sense that matters here: the server refuses to start if it cannot write to the one that is enabled.</p>
+
+    <table>
+      <thead><tr><th>Variable</th><th>Default</th><th>Image default</th><th>Needed when</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>FIRNFLOW_CACHE_NVME_PATH</code></td>
+          <td><code>/tmp/firnflow-cache</code></td>
+          <td><code>/var/lib/firnflow/cache</code></td>
+          <td>Always. This is the NVMe tier of the result cache and it is built during startup.</td>
+        </tr>
+        <tr>
+          <td><code>FIRNFLOW_OBJECT_CACHE_DIR</code></td>
+          <td><code>/tmp/firnflow-object-cache</code></td>
+          <td>unset, so the default applies</td>
+          <td>Only when <code>FIRNFLOW_OBJECT_CACHE_ENABLED=true</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout callout-warning">
+      <div class="callout-title">Read-only root filesystems</div>
+      <p>Under a restricted Pod Security Standard, or any container run with <code>readOnlyRootFilesystem: true</code>, mount a writable volume at <em>each</em> path above that applies to your configuration. Mounting only the object cache directory is the easy mistake, because it is the one the configuration reference discusses at length, while the NVMe result cache is enabled by default and needs a volume whether or not you have configured anything.</p>
+      <p>The image pre-creates <code>/var/lib/firnflow/cache</code>, so directory creation succeeds and the failure comes later, when the cache opens its block file inside it. That startup error now names both the directory and the variable that selected it; on older releases it reported only <code>Read-only file system (os error 30)</code>, with nothing to search for.</p>
+      <pre><code>volumeMounts:
+  - name: firn-cache
+    mountPath: /var/lib/firnflow/cache
+volumes:
+  - name: firn-cache
+    emptyDir: {}</code></pre>
     </div>
 
     <h2>AWS deployment</h2>

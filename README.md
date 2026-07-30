@@ -32,6 +32,8 @@ A query Firn has not seen before misses the result cache and pays the full Lance
 
 If your traffic is mostly unique queries the result-cache hit rate is low by design. The value there is the cost and multi-tenant model of search on object storage, optionally with the object cache absorbing the repeated byte reads underneath.
 
+Both caches keep their data in a local directory that has to be writable by the user the server runs as. The result cache uses `FIRNFLOW_CACHE_NVME_PATH`, which the container image points at `/var/lib/firnflow/cache` rather than the binary's own `/tmp/firnflow-cache` default, and it is always enabled, so that volume is needed whether or not anything else is configured. The object cache uses `FIRNFLOW_OBJECT_CACHE_DIR` and only matters when you switch it on. If you run under a read-only root filesystem, mount a writable volume at each path that applies; see [deployment](https://firnflow.io/deployment.html).
+
 ### Demo
 
 Cold query, warm query, full-text search, and cache proof in 60 seconds, against local MinIO with no index, so the cold query is a fast ~109 ms here. On real S3 an unindexed cold query is closer to ~25 s, an IVF_PQ index brings that to ~979 ms, and repeated queries return from cache in microseconds.

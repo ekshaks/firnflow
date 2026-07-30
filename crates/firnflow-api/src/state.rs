@@ -95,7 +95,7 @@ pub async fn build_state(cfg: &AppConfig) -> anyhow::Result<AppState> {
     if cfg.object_cache_enabled {
         std::fs::create_dir_all(&cfg.object_cache_dir).with_context(|| {
             format!(
-                "creating object cache directory {}",
+                "creating object cache directory {} (set by FIRNFLOW_OBJECT_CACHE_DIR)",
                 cfg.object_cache_dir.display()
             )
         })?;
@@ -118,11 +118,18 @@ pub async fn build_state(cfg: &AppConfig) -> anyhow::Result<AppState> {
 
     std::fs::create_dir_all(&cfg.cache_nvme_path).with_context(|| {
         format!(
-            "creating cache nvme directory {}",
+            "creating cache nvme directory {} (set by FIRNFLOW_CACHE_NVME_PATH)",
             cfg.cache_nvme_path.display()
         )
     })?;
 
+    // Name the directory and the variable that chose it. The container
+    // image pre-creates its default path, so `create_dir_all` above
+    // succeeds and never reports anything; the first write that fails
+    // is foyer's, opening its block file, and that error carries no
+    // path at all. On a read-only root filesystem it surfaces as a bare
+    // "Read-only file system (os error 30)", which names neither the
+    // directory to mount nor the variable that points at it.
     let cache = Arc::new(
         NamespaceCache::new(
             cfg.cache_memory_bytes,
@@ -131,7 +138,13 @@ pub async fn build_state(cfg: &AppConfig) -> anyhow::Result<AppState> {
             Arc::clone(&metrics),
         )
         .await
-        .map_err(|e| anyhow::anyhow!("build namespace cache: {e}"))?,
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "build namespace cache in {} (set by FIRNFLOW_CACHE_NVME_PATH): {e}. \
+                 This directory must be writable by the user the server runs as.",
+                cfg.cache_nvme_path.display()
+            )
+        })?,
     );
 
     let service = Arc::new(NamespaceService::new(
