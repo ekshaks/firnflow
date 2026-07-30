@@ -108,6 +108,56 @@ pub async fn test_state_with_auth(
     (state, tmp)
 }
 
+/// Build a default-open `AppState` backed by a local-filesystem
+/// `StorageRoot`, a real, fully working backend that needs no MinIO
+/// and no network, so handler-level tests built on it run in CI as-is.
+///
+/// Prefer this over [`test_state`] for anything whose assertions do not
+/// depend on object-storage semantics specifically. The storage root
+/// and the foyer NVMe tier get their own subdirectories of the returned
+/// temp dir so neither walks over the other.
+pub async fn test_state_local() -> (AppState, tempfile::TempDir) {
+    let tmp = tempfile::tempdir().unwrap();
+    let storage_dir = tmp.path().join("storage");
+    let cache_dir = tmp.path().join("cache");
+    std::fs::create_dir_all(&storage_dir).unwrap();
+    std::fs::create_dir_all(&cache_dir).unwrap();
+
+    let metrics = test_metrics();
+    let manager = Arc::new(NamespaceManager::new(
+        StorageRoot::local(&storage_dir).expect("local storage root"),
+        HashMap::new(),
+        Arc::clone(&metrics),
+    ));
+    let cache = Arc::new(
+        NamespaceCache::new(
+            16 * 1024 * 1024,
+            &cache_dir,
+            64 * 1024 * 1024,
+            Arc::clone(&metrics),
+        )
+        .await
+        .unwrap(),
+    );
+    let service = Arc::new(NamespaceService::new(
+        Arc::clone(&manager),
+        cache,
+        Arc::clone(&metrics),
+    ));
+    let state = AppState {
+        service,
+        manager,
+        metrics,
+        operations: Arc::new(OperationRegistry::new()),
+        auth: Arc::new(AuthConfig::disabled()),
+        rate_limit: RateLimitSettings::default(),
+        max_body_bytes: 32 * 1024 * 1024,
+        import_max_bytes: 0,
+        import_tmp_dir: tmp.path().to_path_buf(),
+    };
+    (state, tmp)
+}
+
 /// Build an `AppState` with **no** S3 backend touch — purely
 /// in-process, suitable for tests whose every assertion fires
 /// before reaching a handler (auth rejection, rate-limit shedding,
