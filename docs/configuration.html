@@ -194,7 +194,7 @@ GOOGLE_APPLICATION_CREDENTIALS=/etc/firnflow/gcp-sa.json</code></pre>
         <tr>
           <td><code>FIRNFLOW_CACHE_NVME_PATH</code></td>
           <td><code>/tmp/firnflow-cache</code></td>
-          <td>Directory for the foyer NVMe-tier block file. In production, point this at a fast local SSD. The Docker image defaults to <code>/var/lib/firnflow/cache</code>.</td>
+          <td>Directory for the foyer NVMe-tier block file. In production, point this at a fast local SSD. The Docker image overrides the default to <code>/var/lib/firnflow/cache</code>, so that is the path to mount when running the image. Must be writable by the user the server runs as; the server refuses to start otherwise. See <a href="deployment.html">deployment</a> for read-only root filesystems.</td>
         </tr>
         <tr>
           <td><code>FIRNFLOW_CACHE_NVME_BYTES</code></td>
