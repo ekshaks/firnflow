@@ -342,7 +342,7 @@ async fn main() -> anyhow::Result<()> {
         .collect();
 
     // ================================================================
-    // Phase 1+2: Linear scan (no index)
+    // Cold and warm, no vector index: every query is a linear scan
     // ================================================================
     let ns_linear = NamespaceId::new(format!("bench-linear-{}", ts_nanos()))?;
     println!("\n--- linear scan namespace: {} ---", ns_linear);
@@ -370,7 +370,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // ================================================================
-    // Phase 3+4: IVF_PQ indexed
+    // Cold and warm, same corpus behind an IVF_PQ index
     // ================================================================
     let ns_indexed = NamespaceId::new(format!("bench-indexed-{}", ts_nanos()))?;
     println!("\n--- indexed namespace: {} ---", ns_indexed);

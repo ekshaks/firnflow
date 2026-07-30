@@ -1281,9 +1281,16 @@ impl NamespaceManager {
     /// running it in a background task if non-blocking behaviour is
     /// desired.
     ///
-    /// Index build does **not** invalidate the cache — cached query
-    /// results are still correct post-build. See PHASE6_PLAN.md §
-    /// "Cache invalidation and index rebuild" for the rationale.
+    /// Building an index makes previously cached results for this
+    /// namespace unreachable, even though the rows themselves have not
+    /// changed and those results are still correct. The cache
+    /// generation is derived from the Lance table version (see
+    /// [`Self::generation`]), a build commits a new manifest, and every
+    /// cache key carries the generation, so the entries are not
+    /// evicted so much as stranded, and the next query repopulates at
+    /// the new generation. The cost is one round of cache misses per
+    /// namespace per index build, which is the accepted price of
+    /// deriving the generation from something that survives a restart.
     pub async fn create_index(
         &self,
         ns: &NamespaceId,

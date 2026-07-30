@@ -1,4 +1,4 @@
-//! Phase-7 integration test: full-text search and hybrid queries.
+//! Integration test: full-text search and hybrid queries.
 //!
 //! Covers three query modes on the same namespace:
 //! 1. Vector-only query returns nearest neighbours

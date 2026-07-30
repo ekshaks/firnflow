@@ -1,4 +1,4 @@
-//! Spike-1 correctness test.
+//! Cache-invalidation correctness test.
 //!
 //! Exercises the generation-counter invalidation strategy end to end:
 //!
