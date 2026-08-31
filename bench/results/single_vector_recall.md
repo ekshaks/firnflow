@@ -1,10 +1,10 @@
 # Single-vector recall against a full scan — 1M Cohere Wikipedia vectors
 
-- **Date**: 2026-08-21 (1,000,000 rows), 2026-08-29 (100,000 rows)
+- **Date**: 2026-08-21 (1,000,000 rows), 2026-08-29 and 2026-08-31 (100,000 rows)
 - **Harness**: [`bench/recall/`](../recall/README.md)
-- **Firn version**: 0.9.5, built from source at `a5f0a87`, unmodified
+- **Firn version**: 0.9.5, built from source at `a5f0a87`. The only change was a `Cargo.lock` bump of `ethnum` 1.5.2 to 1.5.3, because 1.5.2 does not compile on `aarch64-apple-darwin` (`error[E0512]`). No source file was touched.
 - **Backend**: MinIO on loopback
-- **Corpus**: `Cohere/wikipedia-2023-11-embed-multilingual-v3` English split, dim=1024. Two namespaces: 1,000,000 rows and 100,000 rows
+- **Corpus**: `CohereLabs/wikipedia-2023-11-embed-multilingual-v3` English split, dim=1024, at revision `ade45fb52bd549f5e8c065636fe4160a43c2af36`. The repository was previously named `Cohere/...` and the old name still redirects. Two namespaces: 1,000,000 rows and 100,000 rows. Shard checksums are pinned in `bench/recall/corpus.py` and verified before every import
 - **Index**: IVF_PQ, no tuning options passed, `num_sub_vectors` defaulted to `dim / 16` = 64
 - **Queries**: held-out vectors from a shard that was never loaded, `k=10`, `include_vector: false`. 200 per run, except one repeat run of 100 noted below
 - **Raw data**: [`single_vector_recall_raw/`](single_vector_recall_raw/)
@@ -153,13 +153,84 @@ if compression error grows with the corpus. The flat response to
 `nprobes` is already complete there, and so is the per-query evidence
 that specific true neighbours are never returned at any setting.
 
+## Between two builds of the same index
+
+An IVF index groups the vectors into partitions using k-means, and
+k-means starts from centroids chosen at random. Two builds over
+identical rows produce different partitions. Recall moves between
+builds, so a figure from a single build cannot be separated from one
+lucky or unlucky set of starting centroids.
+
+Three consecutive builds of the same 100,000-row namespace, each scored
+at the default `nprobes` of 20 over the same 200 queries
+([`single_vector_recall_raw/build_repeat_100k.json`](single_vector_recall_raw/build_repeat_100k.json)):
+
+```
+build   recall@10   p50 ms   cache_hits
+    1       0.592     3.41            0
+    2       0.595     3.31            0
+    3       0.587     3.33            0
+```
+
+Nothing was reloaded between builds. `POST /ns/{ns}/index` replaces the
+index in place, and each build took about 60 seconds over 100,000 rows.
+
+The spread is 0.8 percentage points, 0.587 to 0.595. Treat the second
+decimal of any single recall figure in this file as noise of about that
+size. The gap this file reports is around 40 percentage points, so it
+does not depend on which build was measured.
+
+### Probing every partition still returns 0.587
+
+The full `nprobes` curve for build 3
+([`single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](single_vector_recall_raw/nprobes_exhaustive_100k_build3.json)):
+
+```
+nprobes   recall@10   p50 ms
+      1      0.4625     1.34
+      2      0.5335     1.50
+      5      0.5715     2.06
+     10      0.5860     2.95
+     20      0.5870     3.30
+     50      0.5870     3.32
+    100      0.5870     3.31
+    316      0.5870     3.32
+   1000      0.5870     3.32
+```
+
+`num_partitions` was not set, so the server used its default of
+`sqrt(row_count)`, which is 316 for 100,000 rows. **`nprobes` 316
+therefore probes every partition in the index.** An exhaustive probe
+returns the same 0.587 as `nprobes` 20. Nothing is left unexamined, and
+four rows in ten are still wrong.
+
+That removes the first explanation anyone reaches for. The index is not
+missing neighbours because it looks at too few of them. It examines all
+of them and orders them wrongly. Product quantization stores each
+4,096-byte vector as 64 bytes, and distances computed from 64 bytes
+cannot separate the close candidates from each other.
+
+The low end is the control. Recall at 1 partition is 12 points below
+recall at 10, and latency rises with it, so `nprobes` is reaching the
+index and doing what it says.
+
+This is the same shape as the earlier 100,000-row run under
+"A cheaper way to see the same thing": a climb while `nprobes` is small,
+then nothing. The absolute level differs from that run by about ten
+points. The earlier index build no longer exists and the difference is
+larger than the build-to-build spread measured above, so it is not
+accounted for here. The argument uses the shape of the curve, and the
+shape is the same in both runs.
+
 ## Limits
 
 - MinIO on loopback, not a real object store. The latency columns are
   lower than they would be against S3. The recall column does not depend
   on the storage backend.
 - One dataset, two corpus sizes, one index configuration. Nothing here
-  varies `num_partitions`, `num_sub_vectors` or `num_bits`.
+  varies `num_partitions`, `num_sub_vectors` or `num_bits`. Three builds
+  of that one configuration were measured; every other figure in this
+  file comes from a single build.
 - Single-vector namespaces only. Nothing here touches the multivector
   path measured in `beir_multivector_objcache.md`.
 - Single-client, sequential queries. This is not a throughput
