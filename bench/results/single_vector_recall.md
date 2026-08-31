@@ -99,25 +99,26 @@ A second run settles it. On a 100,000-row namespace built the same way,
 
 | nprobes | recall@10 | p50 | p95 | cache hits |
 | ------- | --------: | --: | --: | ---------: |
-| 1 | 0.6300 | 1.14 ms | 1.26 ms | 0 |
-| 2 | 0.6915 | 1.29 ms | 1.39 ms | 0 |
-| 5 | 0.6940 | 1.78 ms | 1.92 ms | 0 |
-| 10 | 0.6945 | 2.64 ms | 2.79 ms | 0 |
-| 20 | 0.6945 | 2.91 ms | 3.07 ms | 0 |
-| 50 | 0.6945 | 2.91 ms | 3.04 ms | 0 |
-| 100 | 0.6945 | 2.91 ms | 3.11 ms | 0 |
-| 316 | 0.6945 | 2.93 ms | 3.05 ms | 0 |
-| 1000 | 0.6945 | 2.92 ms | 3.06 ms | 0 |
+| 1 | 0.4625 | 1.34 ms | 1.97 ms | 0 |
+| 2 | 0.5335 | 1.50 ms | 1.69 ms | 0 |
+| 5 | 0.5715 | 2.06 ms | 2.29 ms | 0 |
+| 10 | 0.5860 | 2.95 ms | 3.17 ms | 0 |
+| 20 | 0.5870 | 3.30 ms | 3.57 ms | 0 |
+| 50 | 0.5870 | 3.32 ms | 3.60 ms | 0 |
+| 100 | 0.5870 | 3.31 ms | 3.61 ms | 0 |
+| 316 | 0.5870 | 3.32 ms | 3.56 ms | 0 |
+| 1000 | 0.5870 | 3.32 ms | 3.59 ms | 0 |
 
 200 queries per row, one run, same corpus and same settings otherwise.
-The last column is the number of measured queries the result cache
-answered. It is zero everywhere, so these are search timings. Raw data
-in
-[`single_vector_recall_raw/nprobes_exhaustive_100k.json`](single_vector_recall_raw/nprobes_exhaustive_100k.json).
+This is the third of the builds measured under "Between two builds of
+the same index" below. The last column is the number of measured
+queries the result cache answered. It is zero everywhere, so these are
+search timings. Raw data in
+[`single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](single_vector_recall_raw/nprobes_exhaustive_100k_build3.json).
 
 Read the first rows first, because they are the control. Going from 1
-partition to 2 adds six points of recall, and latency climbs from
-1.14 ms to 2.91 ms as the setting rises to 20. **The setting works.** It
+partition to 10 adds 12 points of recall, and latency climbs from
+1.34 ms to 2.95 ms across the same span. **The setting works.** It
 reaches the index and it changes both the answers and the cost.
 
 Then read the rest. This index holds 12 partitions. Every setting from
@@ -126,8 +127,10 @@ ways of asking for the same search. Recall stops moving between 10 and
 20, and latency stops in the same place, which is where the index runs
 out of partitions to search.
 
-Per-query ids show the same thing without any averaging. For the first
-query, at every one of the nine settings from 2 to 1000, the ten ids
+Per-query ids show the same thing without any averaging. They come from
+the earlier build described under "An earlier build, superseded" below,
+which is the only build whose per-query ids were recorded. For the first
+query, at every one of the eight settings from 2 to 1000, the ten ids
 returned are the same ten, and six of them match the exact answer:
 
 ```
@@ -179,10 +182,10 @@ above takes a few minutes: one shard to download, one shard to load, one
 index build, one ground-truth scan.
 
 That smaller run carries the same finding. Recall at 100,000 rows is
-0.6945, higher than at a million rows, which is the direction expected
-if compression error grows with the corpus. The flat response to
-`nprobes` is already complete there, and so is the per-query evidence
-that specific true neighbours are never returned at any setting.
+0.587 to 0.595 across three builds, against 0.559 over a million rows at
+the same setting. The flat response to `nprobes` is already complete
+there, and so is the per-query evidence that specific true neighbours
+are never returned at any setting.
 
 ## Between two builds of the same index
 
@@ -206,52 +209,43 @@ build   recall@10   p50 ms   cache_hits
 Nothing was reloaded between builds. `POST /ns/{ns}/index` replaces the
 index in place, and each build took about 60 seconds over 100,000 rows.
 
-The spread is 0.8 percentage points, 0.587 to 0.595. Treat the second
-decimal of any single recall figure in this file as noise of about that
-size. The gap this file reports is around 40 percentage points, so it
-does not depend on which build was measured.
+The spread across these three builds is 0.8 percentage points, 0.587 to
+0.595. Treat the second decimal of a single recall figure as noise of
+about that size. The gap this file reports is around 40 percentage
+points, so it does not depend on which of these builds was measured.
 
-### The full curve for build 3
+That 0.8 figure covers these three builds and nothing else. It does not
+cover the earlier build described next.
 
-The full `nprobes` curve for build 3
-([`single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](single_vector_recall_raw/nprobes_exhaustive_100k_build3.json)):
+### An earlier build, superseded
 
-```
-nprobes   recall@10   p50 ms
-      1      0.4625     1.34
-      2      0.5335     1.50
-      5      0.5715     2.06
-     10      0.5860     2.95
-     20      0.5870     3.30
-     50      0.5870     3.32
-    100      0.5870     3.31
-    316      0.5870     3.32
-   1000      0.5870     3.32
-```
+An earlier build of a 100,000-row namespace was swept the same way and
+scored 0.6945 from `nprobes` 10 upward
+([`single_vector_recall_raw/nprobes_exhaustive_100k.json`](single_vector_recall_raw/nprobes_exhaustive_100k.json)):
 
-Recall stops between 10 and 20 partitions. The index holds 12, so every
-setting from 12 to 1000 searches all of them, and neither column moves
-across that range.
+| nprobes | recall@10 | p50 | p95 | cache hits |
+| ------- | --------: | --: | --: | ---------: |
+| 1 | 0.6300 | 1.14 ms | 1.26 ms | 0 |
+| 2 | 0.6915 | 1.29 ms | 1.39 ms | 0 |
+| 5 | 0.6940 | 1.78 ms | 1.92 ms | 0 |
+| 10 | 0.6945 | 2.64 ms | 2.79 ms | 0 |
+| 20 | 0.6945 | 2.91 ms | 3.07 ms | 0 |
+| 50 | 0.6945 | 2.91 ms | 3.04 ms | 0 |
+| 100 | 0.6945 | 2.91 ms | 3.11 ms | 0 |
+| 316 | 0.6945 | 2.93 ms | 3.05 ms | 0 |
+| 1000 | 0.6945 | 2.92 ms | 3.06 ms | 0 |
 
-The low end is the control. Recall at 1 partition is 12 points below
-recall at 10, and latency rises from 1.34 ms to 2.95 ms across the same
-span, so `nprobes` is reaching the index and doing what it says.
+That is 10.75 percentage points above build 3, where the three repeated
+builds differ from each other by 0.8. The build no longer exists, so the
+difference cannot be traced. It was not reproduced.
 
-That removes the first explanation anyone reaches for. At `nprobes` 20
-this build searches all 12 partitions, so every row is scored and the
-missing rows are not missing for want of looking. Product quantization
-stores each 4,096-byte vector as 64 bytes, and distances computed from
-64 bytes cannot separate close candidates from each other. `nprobes`
-chooses which candidates are considered, not how they are scored, so no
-setting of it fixes an ordering error.
-
-This is the same shape as the earlier 100,000-row run under
-"A cheaper way to see the same thing": a climb while `nprobes` is small,
-then nothing. The absolute level differs from that run by about ten
-points. The earlier index build no longer exists and the difference is
-larger than the build-to-build spread measured above, so it is not
-accounted for here. The argument uses the shape of the curve, and the
-shape is the same in both runs.
+**This run is superseded.** Its recall level supports nothing in this
+file and is not part of the build-variance figure above. One thing is
+still drawn from this build: the per-query id listing under "Why more
+probing does not help", because its ids are the only ones recorded. That
+listing is about which rows came back at each setting, not about the
+level, and it is marked there. The raw data stays in place as a record
+of what was measured.
 
 ## Limits
 

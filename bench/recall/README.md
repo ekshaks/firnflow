@@ -281,8 +281,8 @@ Then it checks rather than assumes. Each setting reads
 after its measured pass, and records the difference:
 
 ```json
-{ "nprobes": 20, "recall@10": 0.6945, "queries": 200,
-  "p50_ms": 2.94, "p95_ms": 3.05, "p99_ms": 3.23, "cache_hits": 0 }
+{ "nprobes": 20, "recall@10": 0.587, "queries": 200,
+  "p50_ms": 3.30, "p95_ms": 3.57, "p99_ms": 3.74, "cache_hits": 0 }
 ```
 
 **`cache_hits` must be 0.** Anything else means that many of the
@@ -371,18 +371,19 @@ Read the result this way:
   the server is doing a full scan. Go back to step 4.
 
 The committed run of this check is the second table in
-[`../results/single_vector_recall.md`](../results/single_vector_recall.md).
+[`../results/single_vector_recall.md`](../results/single_vector_recall.md),
+with its raw output in
+[`../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json).
 It used a 100,000-row namespace rather than the million-row one, so
 substitute that namespace and its ground-truth file to reproduce it
-exactly. Recall climbs from 0.63 at 1 partition to 0.6945 at 10, then
+exactly. Recall climbs from 0.4625 at 1 partition to 0.587 at 20, then
 does not move again through 1000.
 
-A second run of the same sweep, on a later build of the same corpus size,
-is in
-[`../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json).
-It climbs from 0.4625 to 0.587 and then stops, the same shape at a lower
-level. Between `nprobes` 10 and 1000, a hundred-fold increase in how
-much of the index is searched, neither recall nor latency moves.
+An earlier run of the same sweep is in
+[`../results/single_vector_recall_raw/nprobes_exhaustive_100k.json`](../results/single_vector_recall_raw/nprobes_exhaustive_100k.json).
+It has the same shape at a level 10.75 points higher. That build was
+never reproduced. The report marks it superseded and draws nothing from
+it.
 
 To see the same thing on a single query, without any averaging:
 
