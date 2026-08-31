@@ -350,10 +350,8 @@ A second run of the same sweep, on a later build of the same corpus size,
 is in
 [`../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json).
 It climbs from 0.4625 to 0.587 and then stops, the same shape at a lower
-level. `num_partitions` defaulted to `sqrt(100000)` = 316 in that run, so
-its `nprobes` 316 row probes every partition in the index and still
-returns 0.587. When probing everything changes nothing, the candidates
-are being found and ordered wrongly.
+level. Between `nprobes` 10 and 1000, a hundred-fold increase in how
+much of the index is searched, neither recall nor latency moves.
 
 To see the same thing on a single query, without any averaging:
 
