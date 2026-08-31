@@ -37,12 +37,19 @@ well on one says nothing about the other.
 
 | Script | Does |
 | ------ | ---- |
-| `download_shards.py` | Fetches Cohere Wikipedia parquet shards from Hugging Face. |
-| `seed_namespace.py` | Loads shards into a namespace through `POST /ns/{ns}/import`. |
+| `download_shards.py` | Fetches Cohere Wikipedia parquet shards at a pinned dataset revision and verifies each one's sha256. |
+| `seed_namespace.py` | Loads shards into a namespace through `POST /ns/{ns}/import`. Refuses a namespace that already holds rows. |
+| `rebuild_index.py` | Builds or rebuilds the vector index, so the same corpus can be measured across several builds. |
 | `ground_truth.py` | Computes the exact top-k of held-out queries over every loaded row. |
-| `recall_sweep.py` | Queries the server and scores recall@k at several `nprobes` settings. |
+| `recall_sweep.py` | Queries the server and scores recall@k at several `nprobes` settings. Fails if the result cache answered anything. |
 | `probe_ids.py` | Prints the ids one query returns at each setting, next to the exact answer. |
-| `corpus.py` | Shared helpers. Not run directly. |
+| `corpus.py` | Shared helpers, the pinned dataset revision and the shard checksums. Not run directly. |
+
+Every script exits non-zero and explains itself rather than producing a
+number that cannot be trusted. The four cases are a namespace that
+already holds rows, a shard whose checksum does not match, a measured
+pass that the result cache answered, and an index build over an empty
+namespace.
 
 Every script reads two environment variables:
 
@@ -55,10 +62,36 @@ Everything else is a command-line argument. No paths are baked in.
 
 ## The dataset
 
-`Cohere/wikipedia-2023-11-embed-multilingual-v3`, English split. Each
+`CohereLabs/wikipedia-2023-11-embed-multilingual-v3`, English split. Each
 shard is 100,000 rows, 1024 dimensions per row, about 216 MB on disk.
 The embeddings ship pre-computed, so no embedding model and no API key
 are involved, and two people running this get the same vectors.
+
+The dataset was published as `Cohere/wikipedia-2023-11-embed-multilingual-v3`
+and renamed. The old name still redirects.
+
+Downloads are pinned to one commit, not to the `main` branch. A branch
+pointer moves: this dataset was last modified on 2026-03-25, after the
+million-row run recorded in `bench/results/`. The commit and the sha256
+of every shard live in `corpus.py`:
+
+```python
+DATASET_REVISION = "ade45fb52bd549f5e8c065636fe4160a43c2af36"
+SHARD_MANIFEST = {
+    0: ("2c6abfffa7dd336113251b3e6f3fe4ee16688ead7c67b99593cbadc5589e28b3", 216612385),
+    ...
+}
+```
+
+The downloader checks both after fetching, `seed_namespace.py` checks
+them again before importing, and either check failing stops the run. A
+recall figure is only meaningful next to a statement of which bytes
+produced it.
+
+The manifest covers shards 0 to 10, which is what the committed runs
+used. To use another shard, add its entry first. The comment above
+`SHARD_MANIFEST` has the one `curl` command that reads the digest and
+the size from the Hugging Face API, without downloading the file.
 
 turbopuffer benchmarks itself on the same dataset at the same width and
 the same `top_k`, in
@@ -143,6 +176,11 @@ python bench/recall/download_shards.py ./bench-data 0 10
 Shards 0 to 9 become the corpus. Shard 10 supplies the query vectors and
 is never loaded.
 
+Each shard is checked against its pinned sha256 as it arrives. A file
+already on disk is re-checked rather than assumed, so the command is
+safe to re-run after an interrupted download. A mismatch stops the
+script instead of leaving bytes a later run would accept.
+
 ### 3. Load the corpus
 
 ```bash
@@ -152,27 +190,43 @@ python bench/recall/seed_namespace.py wiki1m ./bench-data/en000{0,1,2,3,4,5,6,7,
 The namespace is created by the first import and its dimension is fixed
 at 1024. Ids run from 0 upward in the order the shards are given.
 
+**The script refuses to run if the namespace already holds rows.**
+`/import` appends. It does not replace, and unlike `/upsert` it does not
+merge on `id`. Ids here are positional from 0, so a second run would put
+two rows under every id and every recall figure measured afterwards
+would be wrong with nothing in the output to say so. To start over,
+delete the namespace first:
+
+```bash
+curl -X DELETE http://127.0.0.1:3000/ns/wiki1m
+```
+
+The shard checksums are verified a second time here, before the first
+byte is sent. Afterwards the script compares the row count the server
+reports against the number of rows it sent, and fails if they differ.
+
 ### 4. Build the index
 
 ```bash
-curl -X POST http://127.0.0.1:3000/ns/wiki1m/index \
-  -H 'Content-Type: application/json' -d '{"kind":"ivf_pq"}'
+python bench/recall/rebuild_index.py wiki1m
 ```
 
-Index creation is an admin route. If the server was started with
-`FIRNFLOW_ADMIN_API_KEY` or `FIRNFLOW_API_KEY`, add
-`-H "Authorization: Bearer $KEY"`.
+Index creation is an admin route. Export `FIRNFLOW_API_KEY` if the
+server was started with a key.
 
 No tuning options are passed, so the server picks its own partition
-count and its own `num_sub_vectors` of `dim / 16`, which is 64 here.
-That stores each 4,096-byte vector as 64 bytes.
+count of `sqrt(row_count)` and its own `num_sub_vectors` of `dim / 16`,
+which is 64 here. That stores each 4,096-byte vector as 64 bytes. Pass a
+JSON object as a second argument to override either.
 
 **This step is required.** Without an index the server falls back to a
-full scan, which is the exact answer, and the harness will report
-recall 1.0 while measuring nothing.
+full scan, which is the exact answer, and the harness would report
+recall 1.0 while measuring nothing. The script refuses to build over an
+empty namespace for the same reason.
 
-Poll `GET /operations/{id}` with the returned id until it succeeds.
-The build takes several minutes at a million rows.
+The script polls the operation and returns when the build finishes. That
+takes about a minute over 100,000 rows and several minutes over a
+million.
 
 ### 5. Compute the exact answers
 
@@ -225,13 +279,24 @@ after its measured pass, and records the difference:
 ```
 
 **`cache_hits` must be 0.** Anything else means that many of the
-measured queries were answered from cache, and the script prints a
-warning naming the affected settings.
+measured queries were answered from cache. The script then writes
+nothing to the output path, saves the readings to `OUTPUT.rejected` so
+they can be inspected, names the affected settings, and exits non-zero.
+The output path only ever holds a clean run, so a poisoned result cannot
+be committed by mistake.
 
-The usual cause is running the sweep twice with the same query vectors.
-The second run finds the first run's answers waiting. To clear it, stop
-the server, delete the directory at `FIRNFLOW_CACHE_NVME_PATH`, and
-start it again:
+The usual cause is running the sweep twice with the same query vectors
+and no write in between. The second run finds the first run's answers
+waiting. Building an index counts as a write: Firn derives its cache
+generation from the Lance table version, and committing a new index
+moves that version, so entries from before a rebuild are unreachable.
+That is measured, not assumed. Three sweeps across three consecutive
+builds each reported `cache_hits` 0, and an immediate fourth sweep with
+no rebuild reported 200 out of 200 with p50 falling from 3.33 ms to
+0.76 ms.
+
+To clear the cache, stop the server, delete the directory at
+`FIRNFLOW_CACHE_NVME_PATH`, and start it again:
 
 ```bash
 rm -rf ./bench-cache/results && mkdir -p ./bench-cache/results
@@ -281,6 +346,15 @@ substitute that namespace and its ground-truth file to reproduce it
 exactly. Recall climbs from 0.63 at 1 partition to 0.6945 at 10, then
 does not move again through 1000.
 
+A second run of the same sweep, on a later build of the same corpus size,
+is in
+[`../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json).
+It climbs from 0.4625 to 0.587 and then stops, the same shape at a lower
+level. `num_partitions` defaulted to `sqrt(100000)` = 316 in that run, so
+its `nprobes` 316 row probes every partition in the index and still
+returns 0.587. When probing everything changes nothing, the candidates
+are being found and ordered wrongly.
+
 To see the same thing on a single query, without any averaging:
 
 ```bash
@@ -293,17 +367,42 @@ exact answer underneath. When the lists stop changing while rows from
 the exact answer are still missing from all of them, the missing rows
 were never going to be found by searching wider.
 
+## Repeating the index build
+
+An IVF index groups the vectors into partitions with k-means, and
+k-means starts from centroids chosen at random. Two builds over
+identical rows produce different partitions, so recall moves between
+builds. One build cannot tell a property of the engine from one lucky or
+unlucky set of starting centroids.
+
+`rebuild_index.py` replaces the index in place, so the corpus does not
+need loading again:
+
+```bash
+for build in 1 2 3; do
+  python bench/recall/rebuild_index.py wiki100k
+  python bench/recall/recall_sweep.py wiki100k ./truth.npz 10 20 ./sweep-b$build.json
+done
+```
+
+Three builds of one unchanged 100,000-row namespace, scored at the
+default `nprobes` of 20 over the same 200 queries, gave recall@10 0.592,
+0.595 and 0.587. Each build took about 60 seconds. Read the second
+decimal of any single recall figure as noise of roughly that size, and
+quote a spread rather than a point.
+
 ## Reading the output
 
 `recall_sweep.py` writes a JSON list, one entry per setting:
 
 ```json
-{ "nprobes": 20, "recall@10": 0.6945, "queries": 200,
-  "p50_ms": 0.69, "p95_ms": 0.72, "p99_ms": 0.74 }
+{ "nprobes": 20, "recall@10": 0.587, "queries": 200,
+  "p50_ms": 3.30, "p95_ms": 3.57, "p99_ms": 3.74, "cache_hits": 0 }
 ```
 
 `queries` is the sample size the recall figure was averaged over. Read
-it before the recall figure.
+it before the recall figure. `cache_hits` is 0 in every file the script
+writes; see the section above for what happens when it is not.
 
 Committed results and what they mean are in
 [`../results/single_vector_recall.md`](../results/single_vector_recall.md).
@@ -314,11 +413,17 @@ Committed results and what they mean are in
   real object store. The recall figures do not depend on that. They are
   a property of the index and the data.
 - One dataset, one index configuration. Nothing here varies
-  `num_partitions`, `num_sub_vectors` or `num_bits`.
+  `num_partitions`, `num_sub_vectors` or `num_bits`. Three builds of
+  that one configuration were measured, which gives a spread for the
+  build but says nothing about other configurations.
+- The environment is not captured by any script. The committed report
+  states it in prose. A run on other hardware will produce different
+  latency columns.
 - Single-vector namespaces only. Nothing here touches the multivector
   path.
 - Recall is averaged over 200 queries. Separate runs differ by a couple
-  of points at that sample size, so treat the second decimal as noise.
+  of points at that sample size, and separate builds of the same index
+  differ by about one, so treat the second decimal as noise.
 - The query vectors are real embeddings from a held-out shard, which is
   a harder distribution than randomly generated vectors. Numbers from a
   harness that generates its queries are not comparable to these.
