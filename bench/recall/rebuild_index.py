@@ -23,8 +23,9 @@ Usage:
     python rebuild_index.py NAMESPACE [OPTIONS_JSON]
 
 OPTIONS_JSON is merged into the request body. Omit it to reproduce the
-report, which passed no tuning options and took the server's defaults:
-`num_partitions` of sqrt(row_count) and `num_sub_vectors` of dim / 16.
+report, which passed no tuning options and took the defaults: one
+partition per 8,192 rows, so 12 partitions over 100,000 rows and 122
+over 1,000,000, and `num_sub_vectors` of dim / 16.
 
 Example, three builds of the same corpus scored separately:
     for build in 1 2 3; do
@@ -33,7 +34,7 @@ Example, three builds of the same corpus scored separately:
     done
 
 Example with an explicit partition count:
-    python rebuild_index.py wiki100k '{"num_partitions": 316}'
+    python rebuild_index.py wiki100k '{"num_partitions": 128}'
 
 Index creation is an admin route. Export FIRNFLOW_API_KEY if the server
 was started with a key.

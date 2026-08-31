@@ -215,10 +215,11 @@ python bench/recall/rebuild_index.py wiki1m
 Index creation is an admin route. Export `FIRNFLOW_API_KEY` if the
 server was started with a key.
 
-No tuning options are passed, so the server picks its own partition
-count of `sqrt(row_count)` and its own `num_sub_vectors` of `dim / 16`,
-which is 64 here. That stores each 4,096-byte vector as 64 bytes. Pass a
-JSON object as a second argument to override either.
+No tuning options are passed, so the index takes the LanceDB defaults.
+The partition count is the row count divided by 8,192, which is 12
+partitions over 100,000 rows and 122 over 1,000,000. `num_sub_vectors`
+is `dim / 16`, which is 64 here, and that stores each 4,096-byte vector
+as 64 bytes. Pass a JSON object as a second argument to override either.
 
 **This step is required.** Without an index the server falls back to a
 full scan, which is the exact answer, and the harness would report
@@ -346,13 +347,20 @@ Starting at 1 matters. It is the control. If recall at 1 partition is
 no different from recall at 1000, the setting is not reaching the index
 at all and nothing else in the run can be trusted.
 
+The top of the sweep is capped by the index rather than by the setting.
+`nprobes` cannot search more partitions than the index holds, and with
+no tuning options that is 12 over 100,000 rows and 122 over 1,000,000.
+Every setting at or above the partition count searches the whole index
+and returns the same answer as every other.
+
 Read the result this way:
 
 - **Recall climbs and reaches 1.0.** The index was searching too
   narrowly. Raising `nprobes` is the fix.
 - **Recall climbs at first, then stops below 1.0.** The low end proves
-  the setting works. The flat part means the search has run out of
-  things to find and the answer is still wrong, so the loss is in how
+  the setting works. The flat part starts where `nprobes` reaches the
+  partition count, and from there every row in the table is a candidate.
+  Recall short of 1.0 with every row examined puts the loss in how
   candidates are scored rather than how many are examined. Product
   quantization stores each 4,096-byte vector as 64 bytes, and distances
   computed from those 64 bytes are too coarse to order the candidates

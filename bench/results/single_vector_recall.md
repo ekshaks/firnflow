@@ -5,7 +5,7 @@
 - **Firn version**: 0.9.5, built from source at `a5f0a87`. The only change was a `Cargo.lock` bump of `ethnum` 1.5.2 to 1.5.3, because 1.5.2 does not compile on `aarch64-apple-darwin` (`error[E0512]`). No source file was touched.
 - **Backend**: MinIO on loopback
 - **Corpus**: `CohereLabs/wikipedia-2023-11-embed-multilingual-v3` English split, dim=1024, at revision `ade45fb52bd549f5e8c065636fe4160a43c2af36`. The repository was previously named `Cohere/...` and the old name still redirects. Two namespaces: 1,000,000 rows and 100,000 rows. Shard checksums are pinned in `bench/recall/corpus.py` and verified before every import
-- **Index**: IVF_PQ, no tuning options passed, `num_sub_vectors` defaulted to `dim / 16` = 64
+- **Index**: IVF_PQ, no tuning options passed. The defaults that follow are 12 partitions over 100,000 rows and 122 over 1,000,000, and `num_sub_vectors` of `dim / 16` = 64. "How many partitions there are" below works through where those come from
 - **Queries**: held-out vectors from a shard that was never loaded, `k=10`, `include_vector: false`. 200 per run, except one repeat run of 100 noted below
 - **Raw data**: [`single_vector_recall_raw/`](single_vector_recall_raw/)
 
@@ -30,10 +30,40 @@ one asks whether a human labelled the returned document relevant. An
 index can return a different relevant document, score well on relevance,
 and still return the wrong rows.
 
-## Results
+## How many partitions there are
 
-`nprobes` is the number of IVF partitions searched per query. The server
-default is 20, from `DEFAULT_NPROBES` in `crates/firnflow-core/src/query.rs`.
+`nprobes` is the number of index partitions searched per query. The
+server default is 20, from `DEFAULT_NPROBES` in
+`crates/firnflow-core/src/query.rs`. What that setting can buy depends
+on how many partitions the index holds, so that number comes first.
+
+Firn passes no `num_partitions` when it creates an index. LanceDB 0.29
+then takes the Lance 6 default, which aims for 8,192 rows in each
+IVF_PQ partition and divides the row count by that, with a floor of 1
+and a ceiling of 4,096.
+
+**That is 12 partitions over 100,000 rows and 122 over 1,000,000.**
+
+So the default `nprobes` of 20 searches every partition of the
+100,000-row index, and 20 of the 122 in the million-row index. A value
+above the partition count is capped by it. Asking for 1,000 partitions
+of an index that holds 12 searches those 12 and stops.
+
+The default is two steps of library code:
+
+- LanceDB 0.29 falls through to `IvfBuildParams::default()` when
+  `num_partitions` is unset:
+  [`rust/lancedb/src/table.rs`](https://github.com/lancedb/lancedb/blob/v0.29.0/rust/lancedb/src/table.rs#L1820-L1837)
+- Lance 6 gives IVF_PQ a target partition size of 8,192 rows:
+  [`rust/lance-index/src/lib.rs`](https://github.com/lance-format/lance/blob/v6.0.0/rust/lance-index/src/lib.rs#L295-L313)
+- and turns that into a count with
+  `(num_rows / target).clamp(1, 4096)`:
+  [`rust/lance-index/src/vector/ivf/builder.rs`](https://github.com/lance-format/lance/blob/v6.0.0/rust/lance-index/src/vector/ivf/builder.rs#L115-L120)
+
+The sweeps below include a 316 setting. It is above the partition count
+at both corpus sizes, so it searches the whole index.
+
+## Results
 
 | nprobes | recall@10 | p50 | p95 |
 | ------- | --------: | --: | --: |
@@ -59,9 +89,10 @@ rows.**
 
 An obvious first guess is that the index is only looking at too small a
 slice of the rows, and that a larger `nprobes` would recover the missing
-neighbours. The table above already argues against it. Going from 20
-partitions to 100 searches five times as much of the index, costs 3.9
-times the latency, and buys 1.6 percentage points.
+neighbours. The table above already argues against it. The million-row
+index holds 122 partitions. Going from `nprobes` 20 to 100 takes
+coverage from 20 of those partitions to 100, costs 3.9 times the
+latency, and buys 1.6 percentage points.
 
 A second run settles it. On a 100,000-row namespace built the same way,
 `nprobes` was pushed across three orders of magnitude in a single run:
@@ -89,9 +120,11 @@ partition to 2 adds six points of recall, and latency climbs from
 1.14 ms to 2.91 ms as the setting rises to 20. **The setting works.** It
 reaches the index and it changes both the answers and the cost.
 
-Then read the rest. Recall stops moving at `nprobes` 10 and latency
-stops at 20. Beyond that a fifty-fold increase costs nothing and buys
-nothing.
+Then read the rest. This index holds 12 partitions. Every setting from
+12 upward searches all of them, so the rows from 20 to 1000 are five
+ways of asking for the same search. Recall stops moving between 10 and
+20, and latency stops in the same place, which is where the index runs
+out of partitions to search.
 
 Per-query ids show the same thing without any averaging. For the first
 query, at every one of the nine settings from 2 to 1000, the ten ids
@@ -111,35 +144,33 @@ are returned at no setting at all.
 
 ## What that rules out, and what it does not
 
-Two explanations are ruled out by these numbers.
+At `nprobes` 20 the 100,000-row index searches all 12 of its partitions.
+Every row in the table is a candidate and every row is scored. Nothing
+is left out by the choice of partitions, and recall is still well short
+of 1.0.
 
-The server is not falling back to a full scan at high `nprobes`. A full
-scan gives the exact answer, and recall is 0.6945, not 1.0.
+That is not the same as a full scan. A full scan compares the query
+against the stored 4,096-byte vectors and returns the exact answer, by
+definition. Searching every partition of this index compares the query
+against 64-byte approximations of those vectors. The candidate set is
+the whole table either way. Only the scoring differs, so only the
+scoring can account for the gap.
 
-The missing rows are not being lost to a search that is too narrow in a
-way `nprobes` can fix. Whatever the setting does, it stops doing it
-above 20, and four of the true ten nearest rows are absent at every
-setting including the largest.
-
-The likely remaining cause is the compression. Each vector holds 4,096
-bytes of original data and the index stores it as 64 bytes, a 64-fold
-reduction. Distances computed from those 64 bytes are approximations,
+So the cause is the compression. Distances computed from 64 bytes are
 close enough to gather a plausible set of candidates and too coarse to
-order them correctly. `nprobes` controls which candidates are
-considered, not how they are scored, so no setting of it corrects a
-scoring error. Confirming this needs a re-scoring pass against the
-stored full-precision vectors, which is not part of this measurement.
+order them correctly. `nprobes` chooses which candidates are considered,
+not how they are scored, and no setting of it corrects a scoring error.
 
-One thing here is unexplained and worth flagging rather than smoothing
-over. `num_partitions` is documented in
-`crates/firnflow-core/src/query.rs` as defaulting to `sqrt(row_count)`,
-which is 316 for this namespace. If `nprobes` 316 really searched every
-partition, the cost should follow the slope of the low end: about
-0.09 ms per partition from 1 to 20 predicts roughly 30 ms at 316. The
-measurement is 2.93 ms. Either the partition count is far below 316, or
-`nprobes` stops taking effect above about 20. The same flat response
-appears in this repository's own `nprobes_sweep_fiqa` results. This
-harness cannot tell those apart from the outside.
+Two things this does not settle.
+
+It does not measure whether a re-scoring pass against the stored
+full-precision vectors would recover the missing rows. That pass is not
+part of this measurement.
+
+It does not carry to the million-row index. That one holds 122
+partitions and the default `nprobes` searches 20 of them, so a narrow
+search and a coarse score are both in play there and this run does not
+separate them.
 
 ## A cheaper way to see the same thing
 
@@ -180,7 +211,7 @@ decimal of any single recall figure in this file as noise of about that
 size. The gap this file reports is around 40 percentage points, so it
 does not depend on which build was measured.
 
-### Probing a hundred times wider still returns 0.587
+### The full curve for build 3
 
 The full `nprobes` curve for build 3
 ([`single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](single_vector_recall_raw/nprobes_exhaustive_100k_build3.json)):
@@ -198,32 +229,21 @@ nprobes   recall@10   p50 ms
    1000      0.5870     3.32
 ```
 
-Recall stops at 10 partitions. Going from there to 1000 is a hundred-fold
-increase in how much of the index is searched and it changes neither the
-recall column nor the latency column.
+Recall stops between 10 and 20 partitions. The index holds 12, so every
+setting from 12 to 1000 searches all of them, and neither column moves
+across that range.
 
 The low end is the control. Recall at 1 partition is 12 points below
 recall at 10, and latency rises from 1.34 ms to 2.95 ms across the same
 span, so `nprobes` is reaching the index and doing what it says.
 
-That removes the first explanation anyone reaches for. The index is not
-missing neighbours because it looks at too few of them. Product
-quantization stores each 4,096-byte vector as 64 bytes, and distances
-computed from 64 bytes cannot separate close candidates from each other.
-`nprobes` chooses which candidates are considered, not how they are
-scored, so no setting of it fixes an ordering error.
-
-`num_partitions` was not passed. `crates/firnflow-core/src/query.rs`
-documents the default as `sqrt(row_count)`, which is 316 for 100,000
-rows, so on that reading `nprobes` 316 probes every partition. The
-latency column argues against it. The cost of the first ten partitions
-is about 0.18 ms each, which would put 316 partitions near 57 ms, and
-the measurement is 3.32 ms. Either the index holds far fewer partitions
-than the documented default, or `nprobes` stops taking effect somewhere
-above 10. The same flat response appears in this repository's own
-`nprobes_sweep_fiqa` results. Which of the two it is cannot be told from
-outside the server, and the conclusion above holds either way: whatever
-`nprobes` 1000 does, it does not recover the missing rows.
+That removes the first explanation anyone reaches for. At `nprobes` 20
+this build searches all 12 partitions, so every row is scored and the
+missing rows are not missing for want of looking. Product quantization
+stores each 4,096-byte vector as 64 bytes, and distances computed from
+64 bytes cannot separate close candidates from each other. `nprobes`
+chooses which candidates are considered, not how they are scored, so no
+setting of it fixes an ordering error.
 
 This is the same shape as the earlier 100,000-row run under
 "A cheaper way to see the same thing": a climb while `nprobes` is small,
