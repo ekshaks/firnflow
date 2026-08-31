@@ -94,14 +94,6 @@ used. To use another shard, add its entry first. The comment above
 `SHARD_MANIFEST` has the one `curl` command that reads the digest and
 the size from the Hugging Face API, without downloading the file.
 
-turbopuffer benchmarks itself on the same dataset at the same width and
-the same `top_k`, in
-[`benchmarks/vector-knn-1m-hot.toml`](https://github.com/turbopuffer/tpuf-benchmark/blob/main/benchmarks/vector-knn-1m-hot.toml)
-and
-[`benchmarks/website/vector-10m-hot.toml`](https://github.com/turbopuffer/tpuf-benchmark/blob/main/benchmarks/website/vector-10m-hot.toml).
-One difference: their query vectors are generated pseudorandomly, while
-the ones here are real embeddings from a held-out shard.
-
 Eleven shards cover the million-row run in
 `bench/results/single_vector_recall.md`: shards 0 through 9 are loaded,
 shard 10 supplies the query vectors. That is about 2.4 GB of parquet to
