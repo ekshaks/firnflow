@@ -23,9 +23,14 @@ The warm-up pass before it sends perturbed copies instead. That pulls the
 index and data files onto local disk without leaving result-cache entries
 under the keys the measured pass will use. Each setting then reads
 firnflow_cache_hits_total from /metrics before and after its measured
-pass and records the difference as `cache_hits`. A run with a non-zero
-`cache_hits` was partly answered from cache and its latency figures are
-not search latency. See the README for how to clear it.
+pass and records the difference as `cache_hits`.
+
+A non-zero `cache_hits` at any setting fails the run. The script writes
+nothing to the output path, saves the readings to OUTPUT.rejected for
+inspection, and exits non-zero. Those latency figures are cache lookups
+rather than search timings, and a warning on standard output is too easy
+to scroll past on the way to a committed result. See the README for how
+to clear the cache.
 
 Usage:
     python recall_sweep.py NAMESPACE TRUTH.npz K NPROBES_LIST OUTPUT.json
@@ -158,13 +163,22 @@ def main():
         report.append(row)
         print(json.dumps(row), flush=True)
 
-    with open(output, "w") as handle:
-        json.dump(report, handle, indent=2)
-
     stale = [row["nprobes"] for row in report if row["cache_hits"]]
     if stale:
-        print(f"WARNING: result cache answered queries at nprobes {stale}. "
-              f"Latency for those settings is not search latency.")
+        rejected = output + ".rejected"
+        with open(rejected, "w") as handle:
+            json.dump(report, handle, indent=2)
+        raise SystemExit(
+            f"the result cache answered queries at nprobes {stale}, so the "
+            f"latency columns for those settings are cache lookups and not "
+            f"search timings. Nothing was written to {output}; the run is in "
+            f"{rejected} for inspection. Clear the cache and run again. The "
+            f"README section 'Keeping the result cache out of the latency "
+            f"figures' says how."
+        )
+
+    with open(output, "w") as handle:
+        json.dump(report, handle, indent=2)
     print(f"wrote {output}")
 
 
