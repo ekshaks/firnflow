@@ -32,6 +32,14 @@ rather than search timings, and a warning on standard output is too easy
 to scroll past on the way to a committed result. See the README for how
 to clear the cache.
 
+Every response is checked before it is scored. A query that asks for k
+neighbours must come back with exactly k results, all with distinct ids.
+A short response, or one padded with a repeated id, cannot reach recall
+1.0 however good the index is, so scoring it would file a broken server
+under low recall. The first query that fails stops the run before that
+response is scored, and the run is rejected the same way a cache hit
+rejects it.
+
 Usage:
     python recall_sweep.py NAMESPACE TRUTH.npz K NPROBES_LIST OUTPUT.json
 
@@ -82,6 +90,28 @@ def run_query(session, namespace, vector, k, nprobes):
     return [hit["id"] for hit in response.json()["results"]], elapsed_ms
 
 
+def check_ids(ids, k):
+    """Say why one query's response cannot be scored, or return None.
+
+    Args:
+        ids: the row ids the server returned for one query.
+        k: how many neighbours that query asked for.
+
+    Returns:
+        A short reason string when the response is unusable, otherwise
+        None. Recall divides the overlap with the exact answer by k, so
+        a response carrying fewer than k distinct ids cannot reach 1.0
+        whatever the index does. Scoring it would turn a server fault
+        into a low recall figure with nothing in the output to say so.
+    """
+    if len(ids) != k:
+        return f"returned {len(ids)} results, asked for {k}"
+    distinct = len(set(ids))
+    if distinct != k:
+        return f"returned {k} results holding only {distinct} distinct ids"
+    return None
+
+
 def score_setting(session, namespace, queries, truth_ids, k, nprobes):
     """Measure recall@k and latency for one nprobes setting.
 
@@ -94,8 +124,12 @@ def score_setting(session, namespace, queries, truth_ids, k, nprobes):
         nprobes: how many index partitions to search.
 
     Returns:
-        A dict of recall, latency percentiles and the result-cache hit
-        count observed during the measured pass.
+        A ``(row, fault)`` pair, one of which is always None. On a clean
+        setting the row holds recall, latency percentiles and the
+        result-cache hit count observed during the measured pass. On the
+        first query `check_ids` rejects, the row is None and the fault
+        names that query. Nothing is scored past that point, so an
+        unscorable response never reaches the recall average.
     """
     warmup = unit_normalise(queries + WARMUP_OFFSET)
     for vector in warmup:
@@ -105,13 +139,16 @@ def score_setting(session, namespace, queries, truth_ids, k, nprobes):
     overlaps, latencies = [], []
     for index, vector in enumerate(queries):
         ids, elapsed_ms = run_query(session, namespace, vector.tolist(), k, nprobes)
+        reason = check_ids(ids, k)
+        if reason is not None:
+            return None, {"nprobes": nprobes, "query": index, "reason": reason}
         truth = set(truth_ids[index].tolist())
         overlaps.append(len(truth & set(ids)) / len(truth))
         latencies.append(elapsed_ms)
     hits_after = cache_hit_count(namespace)
 
     ordered = sorted(latencies)
-    return {
+    row = {
         "nprobes": nprobes,
         f"recall@{k}": round(float(np.mean(overlaps)), 4),
         "queries": len(queries),
@@ -120,6 +157,7 @@ def score_setting(session, namespace, queries, truth_ids, k, nprobes):
         "p99_ms": round(percentile(ordered, 0.99), 2),
         "cache_hits": hits_after - hits_before,
     }
+    return row, None
 
 
 def load_truth(path, k):
@@ -148,8 +186,36 @@ def load_truth(path, k):
     return queries, truth_ids[:, :k]
 
 
+def reject(output, report, faults, reason):
+    """Save a run that must not be committed, then stop the script.
+
+    Args:
+        output: the path the caller asked for. Nothing is written there,
+            so only a clean run can ever be committed by mistake.
+        report: the settings measured before the run was rejected.
+        faults: the per-query rejections from `check_ids`, if any.
+        reason: what was wrong, printed as the exit message.
+
+    Raises:
+        SystemExit: always. This is the only way the script reports a
+            measurement it does not stand behind.
+    """
+    rejected = output + ".rejected"
+    with open(rejected, "w") as handle:
+        json.dump({"settings": report, "bad_responses": faults}, handle, indent=2)
+    raise SystemExit(
+        f"{reason} Nothing was written to {output}. The readings are in "
+        f"{rejected} for inspection."
+    )
+
+
 def main():
-    """Sweep every nprobes setting and write the results as JSON."""
+    """Sweep every nprobes setting and write the results as JSON.
+
+    Raises:
+        SystemExit: if any query came back unscorable, or if the result
+            cache answered any measured query.
+    """
     namespace, truth_path, k = sys.argv[1], sys.argv[2], int(sys.argv[3])
     nprobes_list = [int(value) for value in sys.argv[4].split(",")]
     output = sys.argv[5]
@@ -159,22 +225,32 @@ def main():
 
     report = []
     for nprobes in nprobes_list:
-        row = score_setting(session, namespace, queries, truth_ids, k, nprobes)
+        row, fault = score_setting(session, namespace, queries, truth_ids, k, nprobes)
+        if fault is not None:
+            reject(
+                output,
+                report,
+                [fault],
+                f"at nprobes {nprobes}, query {fault['query']} "
+                f"{fault['reason']}. Recall divides by {k}, so scoring that "
+                f"response would record a server that answered wrongly as an "
+                f"index that missed. This setting and the ones after it were "
+                f"left unmeasured.",
+            )
         report.append(row)
         print(json.dumps(row), flush=True)
 
     stale = [row["nprobes"] for row in report if row["cache_hits"]]
     if stale:
-        rejected = output + ".rejected"
-        with open(rejected, "w") as handle:
-            json.dump(report, handle, indent=2)
-        raise SystemExit(
+        reject(
+            output,
+            report,
+            [],
             f"the result cache answered queries at nprobes {stale}, so the "
             f"latency columns for those settings are cache lookups and not "
-            f"search timings. Nothing was written to {output}; the run is in "
-            f"{rejected} for inspection. Clear the cache and run again. The "
-            f"README section 'Keeping the result cache out of the latency "
-            f"figures' says how."
+            f"search timings. Clear the cache and run again. The README "
+            f"section 'Keeping the result cache out of the latency figures' "
+            f"says how.",
         )
 
     with open(output, "w") as handle:

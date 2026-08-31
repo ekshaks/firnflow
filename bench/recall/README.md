@@ -41,15 +41,16 @@ well on one says nothing about the other.
 | `seed_namespace.py` | Loads shards into a namespace through `POST /ns/{ns}/import`. Refuses a namespace that already holds rows. |
 | `rebuild_index.py` | Builds or rebuilds the vector index, so the same corpus can be measured across several builds. |
 | `ground_truth.py` | Computes the exact top-k of held-out queries over every loaded row. Verifies every shard it is given and refuses a query shard that is also in the corpus. |
-| `recall_sweep.py` | Queries the server and scores recall@k at several `nprobes` settings. Fails if the result cache answered anything. |
+| `recall_sweep.py` | Queries the server and scores recall@k at several `nprobes` settings. Fails if the result cache answered anything, or if a query came back with anything other than k distinct ids. |
 | `probe_ids.py` | Prints the ids one query returns at each setting, next to the exact answer. |
 | `corpus.py` | Shared helpers, the pinned dataset revision and the shard checksums. Not run directly. |
 
 Every script exits non-zero and explains itself rather than producing a
-number that cannot be trusted. The five cases are a namespace that
+number that cannot be trusted. The six cases are a namespace that
 already holds rows, a shard whose checksum does not match, a query shard
 that is also part of the corpus, a measured pass that the result cache
-answered, and an index build over an empty namespace.
+answered, a query answered with anything other than k distinct ids, and
+an index build over an empty namespace.
 
 Every script reads two environment variables:
 
@@ -310,6 +311,23 @@ rm -rf ./bench-cache/results && mkdir -p ./bench-cache/results
 Leave `FIRNFLOW_OBJECT_CACHE_DIR` alone. That cache holds the index
 files themselves, and clearing it only makes the first queries slower
 without affecting correctness.
+
+### Rejecting a response that cannot be scored
+
+Recall divides the overlap with the exact answer by `k`. A response that
+carries fewer than `k` ids, or that repeats one, cannot reach 1.0
+however good the index is. Averaged in, it looks like an index that
+missed rather than a server that answered wrongly.
+
+So the sweep requires exactly `k` results with `k` distinct ids from
+every query. The first query that fails names itself and the fault,
+stops the run, and leaves the remaining settings unmeasured.
+
+Both failures write the same file. `OUTPUT.rejected` holds
+`{"settings": [...], "bad_responses": [...]}`: the settings that
+finished before the run stopped, and the per-query rejections, which are
+empty when the cache check is what failed. The output path itself stays
+untouched either way, so only a clean run can be committed.
 
 ## Checking whether more probing helps
 
