@@ -40,16 +40,16 @@ well on one says nothing about the other.
 | `download_shards.py` | Fetches Cohere Wikipedia parquet shards at a pinned dataset revision and verifies each one's sha256. |
 | `seed_namespace.py` | Loads shards into a namespace through `POST /ns/{ns}/import`. Refuses a namespace that already holds rows. |
 | `rebuild_index.py` | Builds or rebuilds the vector index, so the same corpus can be measured across several builds. |
-| `ground_truth.py` | Computes the exact top-k of held-out queries over every loaded row. |
+| `ground_truth.py` | Computes the exact top-k of held-out queries over every loaded row. Verifies every shard it is given and refuses a query shard that is also in the corpus. |
 | `recall_sweep.py` | Queries the server and scores recall@k at several `nprobes` settings. Fails if the result cache answered anything. |
 | `probe_ids.py` | Prints the ids one query returns at each setting, next to the exact answer. |
 | `corpus.py` | Shared helpers, the pinned dataset revision and the shard checksums. Not run directly. |
 
 Every script exits non-zero and explains itself rather than producing a
-number that cannot be trusted. The four cases are a namespace that
-already holds rows, a shard whose checksum does not match, a measured
-pass that the result cache answered, and an index build over an empty
-namespace.
+number that cannot be trusted. The five cases are a namespace that
+already holds rows, a shard whose checksum does not match, a query shard
+that is also part of the corpus, a measured pass that the result cache
+answered, and an index build over an empty namespace.
 
 Every script reads two environment variables:
 
@@ -242,6 +242,11 @@ line up with the ones the server holds.
 The query vectors come from shard 10, which was not loaded. A query
 vector that is also a row in the table finds itself at distance zero.
 That inflates recall and measures nothing.
+
+The script enforces that rather than trusting the command line. It
+verifies the pinned checksum of the query shard and of every corpus
+shard, and it refuses to run when the query shard is also one of the
+corpus shards.
 
 This scans a million rows per query in NumPy. Expect a few minutes.
 

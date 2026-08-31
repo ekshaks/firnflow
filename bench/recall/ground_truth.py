@@ -8,7 +8,13 @@ No index, no approximation, no shortcuts. On a 1,000,000-row corpus of
 The query vectors come from a shard that is NOT loaded into the
 namespace. A query vector that is also a row in the table would find
 itself at distance zero. That inflates the score and tells you nothing
-about the index.
+about the index. This script refuses to run when the query shard is also
+one of the corpus shards, so that claim is enforced here rather than
+left to whoever typed the command.
+
+Every shard is checked against its pinned sha256 first, the query shard
+included. A recall figure only means something next to a statement of
+which bytes produced it.
 
 Shards are scanned one at a time and the running top-k is merged after
 each, so peak memory stays at roughly one shard.
@@ -33,7 +39,38 @@ import sys
 
 import numpy as np
 
-from corpus import read_embeddings, unit_normalise
+from corpus import read_embeddings, shard_index, unit_normalise, verify_shard
+
+
+def verify_inputs(query_shard, corpus_shards):
+    """Check every input shard and refuse a query shard that is also corpus.
+
+    Args:
+        query_shard: parquet shard the query vectors are read from.
+        corpus_shards: parquet shards that were loaded into the namespace.
+
+    Raises:
+        SystemExit: if any shard fails its pinned size or sha256 check,
+            or if the query shard is also one of the corpus shards. In
+            that second case every query vector is also a row in the
+            table, matches itself at distance zero, and takes one of the
+            k slots in both the exact answer and the index's answer. The
+            recall figure then reports an overlap the index did not earn.
+    """
+    verify_shard(query_shard)
+    for path in corpus_shards:
+        verify_shard(path)
+
+    query = shard_index(query_shard)
+    overlap = [path for path in corpus_shards if shard_index(path) == query]
+    if overlap:
+        raise SystemExit(
+            f"{query_shard} supplies the queries and is shard {query}, but "
+            f"shard {query} is also in the corpus as {overlap[0]}. Every "
+            f"query vector would then be a row in the table and match itself "
+            f"at distance zero, so the recall figure would not be about the "
+            f"index. Query from a shard that seed_namespace.py was not given."
+        )
 
 
 def merge_top_k(best_ids, best_scores, new_ids, new_scores, k):
@@ -79,11 +116,17 @@ def scan_shard(queries, path, first_id, k):
 
 
 def main():
-    """Scan every corpus shard and write the merged top-k to disk."""
+    """Scan every corpus shard and write the merged top-k to disk.
+
+    Raises:
+        SystemExit: if no corpus shard was given, or if `verify_inputs`
+            rejects the shards.
+    """
     query_shard, num_queries, k, output = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
     corpus_shards = sys.argv[5:]
     if not corpus_shards:
         raise SystemExit(__doc__)
+    verify_inputs(query_shard, corpus_shards)
 
     queries = unit_normalise(read_embeddings(query_shard, num_queries))
     best_ids = np.zeros((len(queries), 0), dtype=np.int64)
