@@ -46,11 +46,12 @@ well on one says nothing about the other.
 | `corpus.py` | Shared helpers, the pinned dataset revision and the shard checksums. Not run directly. |
 
 Every script exits non-zero and explains itself rather than producing a
-number that cannot be trusted. The six cases are a namespace that
+number that cannot be trusted. The seven cases are a namespace that
 already holds rows, a shard whose checksum does not match, a query shard
 that is also part of the corpus, a measured pass that the result cache
 answered, a query answered with anything other than k distinct ids, and
-an index build over an empty namespace.
+an index build over an empty namespace, or a sweep output path that
+already exists.
 
 Every script reads two environment variables:
 
@@ -109,7 +110,11 @@ carries the same conclusion.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r bench/recall/requirements.txt
+python -m unittest discover -s bench/recall -p 'test_*.py' -v
 ```
+
+The requirements file pins exact package versions. Record the Python
+version and installed packages with any committed result.
 
 ## Running it
 
@@ -198,31 +203,7 @@ The shard checksums are verified a second time here, before the first
 byte is sent. Afterwards the script compares the row count the server
 reports against the number of rows it sent, and fails if they differ.
 
-### 4. Build the index
-
-```bash
-python bench/recall/rebuild_index.py wiki1m
-```
-
-Index creation is an admin route. Export `FIRNFLOW_API_KEY` if the
-server was started with a key.
-
-No tuning options are passed, so the index takes the LanceDB defaults.
-The partition count is the row count divided by 8,192, which is 12
-partitions over 100,000 rows and 122 over 1,000,000. `num_sub_vectors`
-is `dim / 16`, which is 64 here, and that stores each 4,096-byte vector
-as 64 bytes. Pass a JSON object as a second argument to override either.
-
-**This step is required.** Without an index the server falls back to a
-full scan, which is the exact answer, and the harness would report
-recall 1.0 while measuring nothing. The script refuses to build over an
-empty namespace for the same reason.
-
-The script polls the operation and returns when the build finishes. That
-takes about a minute over 100,000 rows and several minutes over a
-million.
-
-### 5. Compute the exact answers
+### 4. Compute the exact answers
 
 ```bash
 python bench/recall/ground_truth.py \
@@ -244,7 +225,47 @@ corpus shards.
 
 This scans a million rows per query in NumPy. Expect a few minutes.
 
-### 6. Score the index
+### 5. Run an unindexed full-scan control
+
+Before building the index, score a smaller query sample through Firn's
+full-scan path:
+
+```bash
+python bench/recall/ground_truth.py \
+  ./bench-data/en0010.parquet 20 10 ./truth-control.npz \
+  ./bench-data/en000{0,1,2,3,4,5,6,7,8,9}.parquet
+python bench/recall/recall_sweep.py wiki1m ./truth-control.npz 10 20 \
+  ./flat-control.json
+```
+
+The control must report Recall@10 of 1.0, exactly 20 valid responses and
+zero result-cache hits. It validates query normalization, the distance
+metric and row-id mapping through the server. Do not build the index
+until this passes. The index commit changes the table version and makes
+the control's exact-result cache entries unreachable.
+
+### 6. Build the index
+
+```bash
+python bench/recall/rebuild_index.py wiki1m
+```
+
+Index creation is an admin route. Export `FIRNFLOW_API_KEY` if the
+server was started with a key.
+
+No tuning options are passed, so the index takes the LanceDB defaults.
+The partition count is the row count divided by 8,192, which is 12
+partitions over 100,000 rows and 122 over 1,000,000. `num_sub_vectors`
+is `dim / 16`, which is 64 here, and that stores each 4,096-byte vector
+as 64 bytes. Pass a JSON object as a second argument to override either.
+
+The script polls the operation and returns when the build finishes. That
+takes about a minute over 100,000 rows and several minutes over a
+million. Record the actual index type, metric, indexed and unindexed row
+counts and index count after the build. Do not rely only on defaults
+derived from source.
+
+### 7. Score the index
 
 ```bash
 python bench/recall/recall_sweep.py wiki1m ./truth-1m.npz 10 10,20,50,100 ./sweep.json
@@ -252,6 +273,10 @@ python bench/recall/recall_sweep.py wiki1m ./truth-1m.npz 10 10,20,50,100 ./swee
 
 The server default is `nprobes` 20 when the field is omitted, so the 20
 row is the shipped behaviour.
+
+The script refuses to start if either `OUTPUT` or `OUTPUT.rejected`
+already exists. Move the old file aside or choose a new path. This keeps
+a failed rerun from leaving an earlier successful result looking current.
 
 ### Keeping the result cache out of the latency figures
 
@@ -360,22 +385,22 @@ Read the result this way:
 - **Recall is flat from `nprobes` 1 upward.** The setting is not
   reaching the index. Neither this nor any other reading holds.
 - **Recall is exactly 1.0 everywhere.** The namespace has no index and
-  the server is doing a full scan. Go back to step 4.
+  the server is doing a full scan. Confirm that step 6 completed.
 
-The committed run of this check is the second table in
+The committed run of this check is the exhaustive `nprobes` table in
 [`../results/single_vector_recall.md`](../results/single_vector_recall.md),
 with its raw output in
-[`../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](../results/single_vector_recall_raw/nprobes_exhaustive_100k_build3.json).
+[`../results/single_vector_recall_raw/nprobes_exhaustive_100k_validation.json`](../results/single_vector_recall_raw/nprobes_exhaustive_100k_validation.json).
 It used a 100,000-row namespace rather than the million-row one, so
 substitute that namespace and its ground-truth file to reproduce it
-exactly. Recall climbs from 0.4625 at 1 partition to 0.587 at 20, then
+exactly. Recall climbs from 0.4305 at 1 partition to 0.5935 at 10, then
 does not move again through 1000.
 
 An earlier run of the same sweep is in
 [`../results/single_vector_recall_raw/nprobes_exhaustive_100k.json`](../results/single_vector_recall_raw/nprobes_exhaustive_100k.json).
-It has the same shape at a level 10.75 points higher. That build was
+It has the same shape at a level about ten points higher. That build was
 never reproduced. The report marks it superseded and draws nothing from
-it.
+it or its per-query id file.
 
 To see the same thing on a single query, without any averaging:
 
@@ -408,10 +433,9 @@ done
 ```
 
 Three builds of one unchanged 100,000-row namespace, scored at the
-default `nprobes` of 20 over the same 200 queries, gave recall@10 0.592,
-0.595 and 0.587. Each build took about 60 seconds. Read the second
-decimal of any single recall figure as noise of roughly that size, and
-quote a spread rather than a point.
+default `nprobes` of 20 over the same 200 queries, gave Recall@10 0.5880,
+0.5925 and 0.5935. Each build took about 66 seconds. Quote the range and
+its 0.55 percentage point spread rather than a single build.
 
 ## Reading the output
 
@@ -438,14 +462,13 @@ Committed results and what they mean are in
   `num_partitions`, `num_sub_vectors` or `num_bits`. Three builds of
   that one configuration were measured, which gives a spread for the
   build but says nothing about other configurations.
-- The environment is not captured by any script. The committed report
-  states it in prose. A run on other hardware will produce different
-  latency columns.
+- The validation environment is recorded in
+  [`../results/single_vector_recall_raw/validation_environment_100k.json`](../results/single_vector_recall_raw/validation_environment_100k.json).
+  A run on other hardware will produce different latency columns.
 - Single-vector namespaces only. Nothing here touches the multivector
   path.
-- Recall is averaged over 200 queries. Separate runs differ by a couple
-  of points at that sample size, and separate builds of the same index
-  differ by about one, so treat the second decimal as noise.
+- Indexed recall is averaged over 200 queries. Three validated builds of
+  the same index span 0.55 percentage points.
 - The query vectors are real embeddings from a held-out shard, which is
   a harder distribution than randomly generated vectors. Numbers from a
   harness that generates its queries are not comparable to these.

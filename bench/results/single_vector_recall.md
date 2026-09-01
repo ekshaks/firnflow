@@ -1,13 +1,14 @@
-# Single-vector recall against a full scan — 1M Cohere Wikipedia vectors
+# Single-vector recall against a full scan
 
-- **Date**: 2026-08-21 (1,000,000 rows), 2026-08-29 and 2026-08-31 (100,000 rows)
+- **Date**: 2026-08-21 (1,000,000 rows), 2026-08-29 to 2026-09-01 (100,000 rows)
 - **Harness**: [`bench/recall/`](../recall/README.md)
-- **Firn version**: 0.9.5, built from source at `a5f0a87`. The only change was a `Cargo.lock` bump of `ethnum` 1.5.2 to 1.5.3, because 1.5.2 does not compile on `aarch64-apple-darwin` (`error[E0512]`). No source file was touched.
+- **Validated Firn image**: `ghcr.io/gordonmurray/firnflow@sha256:4c2b7a58df687423cc1db9b83a541c4b776fefa63d3a73a05850c34173416e19` (version 0.9.5)
 - **Backend**: MinIO on loopback
 - **Corpus**: `CohereLabs/wikipedia-2023-11-embed-multilingual-v3` English split, dim=1024, at revision `ade45fb52bd549f5e8c065636fe4160a43c2af36`. The repository was previously named `Cohere/...` and the old name still redirects. Two namespaces: 1,000,000 rows and 100,000 rows. Shard checksums are pinned in `bench/recall/corpus.py` and verified before every import
-- **Index**: IVF_PQ, no tuning options passed. The defaults that follow are 12 partitions over 100,000 rows and 122 over 1,000,000, and `num_sub_vectors` of `dim / 16` = 64. "How many partitions there are" below works through where those come from
-- **Queries**: held-out vectors from a shard that was never loaded, `k=10`, `include_vector: false`. 200 per run, except one repeat run of 100 noted below
+- **Index**: IVF_PQ with no tuning options passed. The validated 100,000-row index reported L2 distance, 100,000 indexed rows, no unindexed rows and one IVF_PQ index. Source defaults give 12 partitions, 64 sub-vectors and 8-bit product quantization
+- **Queries**: held-out vectors from a shard that was never loaded, `k=10`, `include_vector: false`. Indexed runs use 200 queries. The unindexed control uses 20
 - **Raw data**: [`single_vector_recall_raw/`](single_vector_recall_raw/)
+- **Validation environment**: [`validation_environment_100k.json`](single_vector_recall_raw/validation_environment_100k.json)
 
 ## What recall@10 is here
 
@@ -63,7 +64,75 @@ The default is two steps of library code:
 The sweeps below include a 316 setting. It is above the partition count
 at both corpus sizes, so it searches the whole index.
 
-## Results
+## Maintainer-validated 100k results
+
+The final validation started with no vector index. Twenty held-out
+queries went through Firn's full-scan path and matched the independently
+computed exact top ten for every query:
+
+| path | queries | recall@10 | p50 | p95 | cache hits |
+| ---- | ------: | --------: | --: | --: | ---------: |
+| unindexed full scan | 20 | 1.0000 | 528.41 ms | 659.89 ms | 0 |
+
+This control checks the held-out queries, normalization, distance
+ordering and row-id mapping end to end. Its raw output is in
+[`flat_scan_100k_validation.json`](single_vector_recall_raw/flat_scan_100k_validation.json).
+
+The same unchanged namespace was then indexed three times with the
+default IVF_PQ configuration. Each build was scored at Firn's default
+`nprobes` of 20 over the same 200 queries:
+
+| build | recall@10 | p50 | p95 | cache hits |
+| ----: | --------: | --: | --: | ---------: |
+| 1 | 0.5880 | 18.77 ms | 22.84 ms | 0 |
+| 2 | 0.5925 | 14.25 ms | 16.85 ms | 0 |
+| 3 | 0.5935 | 16.04 ms | 20.15 ms | 0 |
+
+Recall spans 0.5880 to 0.5935, a spread of 0.55 percentage points.
+The raw build data is in
+[`build_repeat_100k_validation.json`](single_vector_recall_raw/build_repeat_100k_validation.json).
+
+The third build was swept across three orders of magnitude:
+
+| nprobes | recall@10 | p50 | p95 | cache hits |
+| ------- | --------: | --: | --: | ---------: |
+| 1 | 0.4305 | 9.70 ms | 12.64 ms | 0 |
+| 2 | 0.4975 | 8.87 ms | 11.22 ms | 0 |
+| 5 | 0.5795 | 10.76 ms | 13.80 ms | 0 |
+| 10 | 0.5935 | 15.05 ms | 18.36 ms | 0 |
+| **20** (default) | **0.5935** | **16.04 ms** | **20.15 ms** | **0** |
+| 50 | 0.5935 | 15.60 ms | 18.50 ms | 0 |
+| 100 | 0.5935 | 15.63 ms | 18.39 ms | 0 |
+| 316 | 0.5935 | 15.96 ms | 20.21 ms | 0 |
+| 1000 | 0.5935 | 16.42 ms | 20.13 ms | 0 |
+
+The low settings are the control for `nprobes`: changing the setting
+changes both answers and latency. Recall stops moving at 10, just before
+the 12-partition index is fully searched. Searching all partitions does
+not recover the missing neighbours. The raw sweep is in
+[`nprobes_exhaustive_100k_validation.json`](single_vector_recall_raw/nprobes_exhaustive_100k_validation.json).
+
+The first query shows the plateau without averaging. From `nprobes` 5
+through 1000, every setting returned the same ten ids and six matched
+the exact top ten:
+
+```
+nprobes     1  found 5/10  [3783, 3793, 3794, 3780, 3779, ...]
+nprobes     2  found 5/10  [3783, 3793, 3794, 3780, 3779, ...]
+nprobes     5  found 6/10  [3783, 3793, 3794, 3780, 3779, ...]
+nprobes  1000  found 6/10  [3783, 3793, 3794, 3780, 3779, ...]
+exact                      [3777, 3793, 3783, 3779, 3786, ...]
+```
+
+Full lists are in
+[`query0_ids_by_nprobes_100k_validation.json`](single_vector_recall_raw/query0_ids_by_nprobes_100k_validation.json).
+Rows 3777, 3867, 25697 and 3807 are among the true ten nearest and are
+returned at no setting.
+
+## Historical 1M results
+
+The original million-row run is retained because it shows the same
+direction at a larger corpus size:
 
 | nprobes | recall@10 | p50 | p95 |
 | ------- | --------: | --: | --: |
@@ -72,78 +141,16 @@ at both corpus sizes, so it searches the whole index.
 | 50 | 0.5725 | 9.86 ms | 10.89 ms |
 | 100 | 0.575 | 18.47 ms | 18.77 ms |
 
-200 queries per row. A separate 100-query run at the default scored
-0.528, so the range across every run is 0.53 to 0.58. Treat the second
-decimal as noise at this sample size.
-
-One caveat on this table only. It was measured before the harness
-started recording result-cache hits, so its latency column has no
-zero-hit check behind it and may be optimistic. The 100,000-row table
-below does carry that check. Recall is unaffected either way, because a
-cached result is the same result.
-
-**The default configuration returns about five of the true ten nearest
-rows.**
+These measurements predate the final output-file guard, environment
+record and cache-hit rejection. They are directional evidence only.
+Their latency must not be compared with the validated 100,000-row run,
+which used different hardware and container networking.
 
 ## Why more probing does not help
 
-An obvious first guess is that the index is only looking at too small a
-slice of the rows, and that a larger `nprobes` would recover the missing
-neighbours. The table above already argues against it. The million-row
-index holds 122 partitions. Going from `nprobes` 20 to 100 takes
-coverage from 20 of those partitions to 100, costs 3.9 times the
-latency, and buys 1.6 percentage points.
-
-A second run settles it. On a 100,000-row namespace built the same way,
-`nprobes` was pushed across three orders of magnitude in a single run:
-
-| nprobes | recall@10 | p50 | p95 | cache hits |
-| ------- | --------: | --: | --: | ---------: |
-| 1 | 0.4625 | 1.34 ms | 1.97 ms | 0 |
-| 2 | 0.5335 | 1.50 ms | 1.69 ms | 0 |
-| 5 | 0.5715 | 2.06 ms | 2.29 ms | 0 |
-| 10 | 0.5860 | 2.95 ms | 3.17 ms | 0 |
-| 20 | 0.5870 | 3.30 ms | 3.57 ms | 0 |
-| 50 | 0.5870 | 3.32 ms | 3.60 ms | 0 |
-| 100 | 0.5870 | 3.31 ms | 3.61 ms | 0 |
-| 316 | 0.5870 | 3.32 ms | 3.56 ms | 0 |
-| 1000 | 0.5870 | 3.32 ms | 3.59 ms | 0 |
-
-200 queries per row, one run, same corpus and same settings otherwise.
-This is the third of the builds measured under "Between two builds of
-the same index" below. The last column is the number of measured
-queries the result cache answered. It is zero everywhere, so these are
-search timings. Raw data in
-[`single_vector_recall_raw/nprobes_exhaustive_100k_build3.json`](single_vector_recall_raw/nprobes_exhaustive_100k_build3.json).
-
-Read the first rows first, because they are the control. Going from 1
-partition to 10 adds 12 points of recall, and latency climbs from
-1.34 ms to 2.95 ms across the same span. **The setting works.** It
-reaches the index and it changes both the answers and the cost.
-
-Then read the rest. This index holds 12 partitions. Every setting from
-12 upward searches all of them, so the rows from 20 to 1000 are five
-ways of asking for the same search. Recall stops moving between 10 and
-20, and latency stops in the same place, which is where the index runs
-out of partitions to search.
-
-Per-query ids show the same thing without any averaging. They come from
-the earlier build described under "An earlier build, superseded" below,
-which is the only build whose per-query ids were recorded. For the first
-query, at every one of the eight settings from 2 to 1000, the ten ids
-returned are the same ten, and six of them match the exact answer:
-
-```
-nprobes     1  found 6/10  [62829, 67697, 59721, 47314, 20498, ...]
-nprobes     2  found 6/10  [62829, 67697, 59721, 24449, 47314, ...]
-nprobes  1000  found 6/10  [62829, 67697, 59721, 24449, 47314, ...]
-exact                      [62829, 74773, 67697, 59719, 59721, ...]
-```
-
-Full lists for all nine settings in
-[`single_vector_recall_raw/query0_ids_by_nprobes_100k.json`](single_vector_recall_raw/query0_ids_by_nprobes_100k.json).
-Rows 74773, 24462, 67843 and 62944 are among the true ten nearest and
-are returned at no setting at all.
+The 100,000-row index holds 12 partitions. Every setting from 12 upward
+searches all of them. Recall and latency stop moving at that boundary,
+which is where the index runs out of partitions to search.
 
 ## What that rules out, and what it does not
 
@@ -182,70 +189,22 @@ above takes a few minutes: one shard to download, one shard to load, one
 index build, one ground-truth scan.
 
 That smaller run carries the same finding. Recall at 100,000 rows is
-0.587 to 0.595 across three builds, against 0.559 over a million rows at
-the same setting. The flat response to `nprobes` is already complete
+0.5880 to 0.5935 across three builds, against 0.559 over a million rows
+at the same setting. The flat response to `nprobes` is already complete
 there, and so is the per-query evidence that specific true neighbours
 are never returned at any setting.
 
-## Between two builds of the same index
+## Superseded 100k runs
 
-An IVF index groups the vectors into partitions using k-means, and
-k-means starts from centroids chosen at random. Two builds over
-identical rows produce different partitions. Recall moves between
-builds, so a figure from a single build cannot be separated from one
-lucky or unlucky set of starting centroids.
+The raw directory retains earlier 100,000-row runs for auditability.
+One unreproducible build reached 0.6945 Recall@10. Its environment and
+index state were not recorded well enough to explain the difference.
+No conclusion in this report uses that run, its latency or its id list.
 
-Three consecutive builds of the same 100,000-row namespace, each scored
-at the default `nprobes` of 20 over the same 200 queries
-([`single_vector_recall_raw/build_repeat_100k.json`](single_vector_recall_raw/build_repeat_100k.json)):
-
-```
-build   recall@10   p50 ms   cache_hits
-    1       0.592     3.41            0
-    2       0.595     3.31            0
-    3       0.587     3.33            0
-```
-
-Nothing was reloaded between builds. `POST /ns/{ns}/index` replaces the
-index in place, and each build took about 60 seconds over 100,000 rows.
-
-The spread across these three builds is 0.8 percentage points, 0.587 to
-0.595. Treat the second decimal of a single recall figure as noise of
-about that size. The gap this file reports is around 40 percentage
-points, so it does not depend on which of these builds was measured.
-
-That 0.8 figure covers these three builds and nothing else. It does not
-cover the earlier build described next.
-
-### An earlier build, superseded
-
-An earlier build of a 100,000-row namespace was swept the same way and
-scored 0.6945 from `nprobes` 10 upward
-([`single_vector_recall_raw/nprobes_exhaustive_100k.json`](single_vector_recall_raw/nprobes_exhaustive_100k.json)):
-
-| nprobes | recall@10 | p50 | p95 | cache hits |
-| ------- | --------: | --: | --: | ---------: |
-| 1 | 0.6300 | 1.14 ms | 1.26 ms | 0 |
-| 2 | 0.6915 | 1.29 ms | 1.39 ms | 0 |
-| 5 | 0.6940 | 1.78 ms | 1.92 ms | 0 |
-| 10 | 0.6945 | 2.64 ms | 2.79 ms | 0 |
-| 20 | 0.6945 | 2.91 ms | 3.07 ms | 0 |
-| 50 | 0.6945 | 2.91 ms | 3.04 ms | 0 |
-| 100 | 0.6945 | 2.91 ms | 3.11 ms | 0 |
-| 316 | 0.6945 | 2.93 ms | 3.05 ms | 0 |
-| 1000 | 0.6945 | 2.92 ms | 3.06 ms | 0 |
-
-That is 10.75 percentage points above build 3, where the three repeated
-builds differ from each other by 0.8. The build no longer exists, so the
-difference cannot be traced. It was not reproduced.
-
-**This run is superseded.** Its recall level supports nothing in this
-file and is not part of the build-variance figure above. One thing is
-still drawn from this build: the per-query id listing under "Why more
-probing does not help", because its ids are the only ones recorded. That
-listing is about which rows came back at each setting, not about the
-level, and it is marked there. The raw data stays in place as a record
-of what was measured.
+The maintained result is the 2026-09-01 validation above. It includes a
+fresh full-scan control, three fresh index builds, a new exhaustive
+sweep, fresh per-query ids, exact dependency pins, result checksums and
+a machine-readable environment record.
 
 ## Limits
 
@@ -260,11 +219,10 @@ of what was measured.
   path measured in `beir_multivector_objcache.md`.
 - Single-client, sequential queries. This is not a throughput
   measurement.
-- The hardware was a laptop: Apple M3 Pro, 11 cores, 18 GB RAM, with the
-  server, MinIO and the harness all on the same machine.
-- The two corpus sizes were measured a week apart on the same machine,
-  so their latency columns are not directly comparable to each other.
-  The recall figures within each run are.
+- The validated run used an Intel i7-13700H system with 20 logical CPUs
+  and 15.9 GB RAM. The server, MinIO and harness ran on the same machine.
+- Runs on different hardware are not latency comparisons. The recall
+  figures within each run are.
 
 ## Reproducing
 

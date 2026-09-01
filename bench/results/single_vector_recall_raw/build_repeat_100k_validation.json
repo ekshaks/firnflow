@@ -1,0 +1,38 @@
+[
+  {
+    "build": 1,
+    "table_version": 3,
+    "index_build_seconds": 67.3,
+    "nprobes": 20,
+    "recall@10": 0.588,
+    "queries": 200,
+    "p50_ms": 18.77,
+    "p95_ms": 22.84,
+    "p99_ms": 24.09,
+    "cache_hits": 0
+  },
+  {
+    "build": 2,
+    "table_version": 4,
+    "index_build_seconds": 66.3,
+    "nprobes": 20,
+    "recall@10": 0.5925,
+    "queries": 200,
+    "p50_ms": 14.25,
+    "p95_ms": 16.85,
+    "p99_ms": 18.74,
+    "cache_hits": 0
+  },
+  {
+    "build": 3,
+    "table_version": 5,
+    "index_build_seconds": 66.3,
+    "nprobes": 20,
+    "recall@10": 0.5935,
+    "queries": 200,
+    "p50_ms": 16.04,
+    "p95_ms": 20.15,
+    "p99_ms": 22.2,
+    "cache_hits": 0
+  }
+]

@@ -23,6 +23,7 @@ import numpy as np
 import requests
 
 from corpus import BASE_URL, auth_headers
+from recall_sweep import check_ids
 
 
 def query_ids(namespace, vector, k, nprobes):
@@ -68,6 +69,9 @@ def main():
     report = {"query_index": query_index, "k": k, "exact": exact, "returned": {}}
     for nprobes in nprobes_list:
         ids = query_ids(namespace, vector, k, nprobes)
+        reason = check_ids(ids, k)
+        if reason is not None:
+            raise SystemExit(f"at nprobes {nprobes}, query {query_index} {reason}")
         report["returned"][str(nprobes)] = ids
         found = len(set(exact) & set(ids))
         print(f"nprobes {nprobes:>5}  found {found}/{k}  {ids}", flush=True)

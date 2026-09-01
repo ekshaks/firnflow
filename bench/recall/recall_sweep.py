@@ -51,6 +51,7 @@ Example:
 """
 
 import json
+import os
 import statistics
 import sys
 import time
@@ -209,6 +210,30 @@ def reject(output, report, faults, reason):
     )
 
 
+def refuse_existing_outputs(output):
+    """Refuse output paths that already contain an earlier run.
+
+    A rejected run writes ``OUTPUT.rejected`` and deliberately leaves
+    ``OUTPUT`` untouched. Reusing either path could therefore leave an old
+    successful result beside a new rejection, or an old rejection beside a
+    new success. Refusing both makes each invocation produce one unambiguous
+    pair of paths.
+
+    Args:
+        output: path the caller wants a successful run written to.
+
+    Raises:
+        SystemExit: if ``output`` or ``output + ".rejected"`` already exists.
+    """
+    existing = [path for path in (output, output + ".rejected") if os.path.exists(path)]
+    if existing:
+        raise SystemExit(
+            f"refusing to reuse existing output path(s): {', '.join(existing)}. "
+            f"Move them aside or choose a new OUTPUT. A rejected rerun must "
+            f"not leave an earlier successful result looking current."
+        )
+
+
 def main():
     """Sweep every nprobes setting and write the results as JSON.
 
@@ -219,6 +244,7 @@ def main():
     namespace, truth_path, k = sys.argv[1], sys.argv[2], int(sys.argv[3])
     nprobes_list = [int(value) for value in sys.argv[4].split(",")]
     output = sys.argv[5]
+    refuse_existing_outputs(output)
 
     queries, truth_ids = load_truth(truth_path, k)
     session = requests.Session()
