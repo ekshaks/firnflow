@@ -122,6 +122,7 @@ async fn three_namespaces_with_different_dims() {
             None,
             None,
             None,
+            None,
             true,
             false,
         )
@@ -148,6 +149,7 @@ async fn three_namespaces_with_different_dims() {
             None,
             None,
             None,
+            None,
             true,
             false,
         )
@@ -170,6 +172,7 @@ async fn three_namespaces_with_different_dims() {
             unit_vector(16, 0),
             None,
             2,
+            None,
             None,
             None,
             None,
@@ -207,6 +210,7 @@ async fn three_namespaces_with_different_dims() {
             unit_vector(4, 0),
             None,
             1,
+            None,
             None,
             None,
             None,

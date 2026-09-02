@@ -35,6 +35,7 @@ fn request(filter: Option<&str>) -> QueryRequest {
         vectors: None,
         k: 10,
         nprobes: None,
+        refine_factor: None,
         text: None,
         filter: filter.map(str::to_string),
         include_vector: false,

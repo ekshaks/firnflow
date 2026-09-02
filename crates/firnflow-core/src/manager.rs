@@ -1254,6 +1254,7 @@ impl NamespaceManager {
         vectors: Option<Vec<Vec<f32>>>,
         k: usize,
         nprobes: Option<usize>,
+        refine_factor: Option<u32>,
         text: Option<String>,
         filter: Option<String>,
         include_vector: bool,
@@ -1272,6 +1273,17 @@ impl NamespaceManager {
         if !vector.is_empty() && vectors.is_some() {
             return Err(FirnflowError::InvalidRequest(
                 "query may set at most one of `vector` or `vectors`".into(),
+            ));
+        }
+
+        if refine_factor == Some(0) {
+            // Zero would size the rerank candidate pool at 0 * k rows.
+            // Reject it here with a clear message instead of handing
+            // Lance a query plan that can only return nothing.
+            return Err(FirnflowError::InvalidRequest(
+                "refine_factor must be at least 1; it multiplies k to size the \
+                 pool of candidates re-scored against full-precision vectors"
+                    .into(),
             ));
         }
 
@@ -1401,6 +1413,15 @@ impl NamespaceManager {
                 vq = vq.nprobes(nprobes);
             }
             vq = vq.limit(k);
+            // An IVF_PQ index ranks by quantised distance. Asking for
+            // `refine_factor * k` candidates and re-scoring them
+            // against the stored full-precision vectors returns the
+            // true top-k of that pool instead of the quantiser's
+            // guess at it. A neighbour the quantiser never put in the
+            // pool is still missed, so a larger factor recalls more.
+            if let Some(rf) = refine_factor {
+                vq = vq.refine_factor(rf);
+            }
             if let Some(ref t) = text {
                 vq = vq.full_text_search(FullTextSearchQuery::new(t.clone()));
             }

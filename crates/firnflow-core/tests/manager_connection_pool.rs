@@ -142,6 +142,7 @@ async fn cached_handle_survives_across_operations() {
             None,
             None,
             None,
+            None,
             true,
             false,
         )
@@ -240,6 +241,7 @@ async fn handle_evicted_after_compaction() {
             vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             None,
             2,
+            None,
             None,
             None,
             None,

@@ -420,6 +420,7 @@ fn op_search(
         vectors,
         k: limit,
         nprobes: None,
+        refine_factor: None,
         text: query,
         filter,
         include_vector: include_vectors,

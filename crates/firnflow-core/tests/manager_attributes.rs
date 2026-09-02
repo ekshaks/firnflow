@@ -165,7 +165,18 @@ async fn a_second_declaration_adds_to_the_first() {
 
     // The rows written before the column existed read back without it.
     let hits = manager
-        .query(&ns, unit_vector(0), None, 3, None, None, None, true, false)
+        .query(
+            &ns,
+            unit_vector(0),
+            None,
+            3,
+            None,
+            None,
+            None,
+            None,
+            true,
+            false,
+        )
         .await
         .expect("query");
     let first = hits.results.first().expect("a hit");
@@ -211,7 +222,18 @@ async fn illegal_names_are_rejected_before_any_write() {
 async fn values_come_back_on_query_results() {
     let (manager, ns, _dir) = seeded().await;
     let results = manager
-        .query(&ns, unit_vector(0), None, 3, None, None, None, true, false)
+        .query(
+            &ns,
+            unit_vector(0),
+            None,
+            3,
+            None,
+            None,
+            None,
+            None,
+            true,
+            false,
+        )
         .await
         .expect("query")
         .results;
@@ -244,7 +266,18 @@ async fn values_come_back_on_query_results() {
 async fn a_vector_light_query_still_carries_attributes() {
     let (manager, ns, _dir) = seeded().await;
     let results = manager
-        .query(&ns, unit_vector(0), None, 3, None, None, None, false, false)
+        .query(
+            &ns,
+            unit_vector(0),
+            None,
+            3,
+            None,
+            None,
+            None,
+            None,
+            false,
+            false,
+        )
         .await
         .expect("query")
         .results;
@@ -270,6 +303,7 @@ async fn a_filter_over_an_attribute_narrows_the_result_set() {
             None,
             None,
             None,
+            None,
             false,
             false,
         )
@@ -284,6 +318,7 @@ async fn a_filter_over_an_attribute_narrows_the_result_set() {
             unit_vector(0),
             None,
             10,
+            None,
             None,
             None,
             Some("section = 'warnings'".into()),
@@ -307,6 +342,7 @@ async fn a_filter_over_an_attribute_narrows_the_result_set() {
             10,
             None,
             None,
+            None,
             Some("year >= 2025".into()),
             false,
             false,
@@ -322,6 +358,7 @@ async fn a_filter_over_an_attribute_narrows_the_result_set() {
             unit_vector(0),
             None,
             10,
+            None,
             None,
             None,
             Some("archived = false".into()),
@@ -370,7 +407,18 @@ async fn an_integer_written_to_a_float_column_is_widened() {
         .expect("an int is a legal float");
 
     let results = manager
-        .query(&ns, unit_vector(3), None, 1, None, None, None, false, false)
+        .query(
+            &ns,
+            unit_vector(3),
+            None,
+            1,
+            None,
+            None,
+            None,
+            None,
+            false,
+            false,
+        )
         .await
         .expect("query")
         .results;
@@ -407,6 +455,7 @@ async fn re_upserting_without_attributes_clears_them() {
             unit_vector(0),
             None,
             10,
+            None,
             None,
             None,
             Some("id = 1".into()),
@@ -460,6 +509,7 @@ async fn a_scalar_index_can_be_built_on_an_attribute_column() {
             unit_vector(0),
             None,
             10,
+            None,
             None,
             None,
             Some("section = 'warnings'".into()),
@@ -520,6 +570,7 @@ async fn import_into_a_namespace_with_attributes_writes_nulls() {
             5,
             None,
             None,
+            None,
             Some("id = 99".into()),
             false,
             false,
@@ -540,6 +591,7 @@ async fn import_into_a_namespace_with_attributes_writes_nulls() {
             unit_vector(3),
             None,
             5,
+            None,
             None,
             None,
             Some("section = 'warnings'".into()),

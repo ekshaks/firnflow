@@ -51,6 +51,20 @@ pub struct QueryRequest {
     /// omitted.
     #[serde(default)]
     pub nprobes: Option<usize>,
+    /// Over-fetch multiplier for the full-precision rerank pass.
+    ///
+    /// An IVF_PQ index ranks by *quantised* distance, which is a
+    /// lossy approximation of the true distance. With
+    /// `refine_factor: n`, Lance retrieves `n * k` candidates by
+    /// quantised distance, re-scores them against the stored
+    /// full-precision vectors, and returns the true top `k` *of that
+    /// pool*. A true neighbour the quantiser never shortlisted is
+    /// still missed, so recall climbs with `n` rather than jumping
+    /// straight to 1.0. `None` (the default) keeps the historical
+    /// behaviour: no rerank, so the results are whatever the
+    /// quantiser ranked highest.
+    #[serde(default)]
+    pub refine_factor: Option<u32>,
     /// Full-text search query string. When set alongside a vector
     /// field, triggers hybrid search (vector + FTS combined via RRF).
     /// When set without any vector field, triggers FTS-only search.
@@ -202,6 +216,10 @@ pub fn validate_semantic_cache_request(req: &QueryRequest) -> Result<(), crate::
 /// Checks:
 /// - `exact: true` with `nprobes` set returns 400. The two knobs
 ///   describe different execution plans and cannot be combined.
+/// - `exact: true` with `refine_factor` set returns 400, for the same
+///   reason. An exact query scores every row against the stored
+///   full-precision vectors, so there is no quantised shortlist left
+///   to re-score.
 /// - `exact: true` with no vector field returns 400. FTS-only queries
 ///   have no vector index to bypass; use a plain FTS query instead.
 /// - `exact: true` on a multivector query returns 400. Whether
@@ -220,6 +238,14 @@ pub fn validate_exact_query_request(req: &QueryRequest) -> Result<(), crate::Fir
         return Err(crate::FirnflowError::InvalidRequest(
             "`exact: true` and `nprobes` cannot be set together; \
              they describe different execution plans"
+                .into(),
+        ));
+    }
+    if req.refine_factor.is_some() {
+        return Err(crate::FirnflowError::InvalidRequest(
+            "`exact: true` and `refine_factor` cannot be set together; \
+             an exact query already scores every row against the stored \
+             full-precision vectors"
                 .into(),
         ));
     }
@@ -372,6 +398,7 @@ mod tests {
             vectors: None,
             k: 10,
             nprobes: None,
+            refine_factor: None,
             text: None,
             filter: None,
             include_vector: true,
@@ -511,6 +538,27 @@ mod tests {
             }
             other => panic!("expected InvalidRequest, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn exact_with_refine_factor_is_rejected() {
+        let mut req = req_vector_only();
+        req.exact = true;
+        req.refine_factor = Some(5);
+        let err = validate_exact_query_request(&req).unwrap_err();
+        match err {
+            FirnflowError::InvalidRequest(msg) => {
+                assert!(msg.contains("refine_factor"), "{msg}");
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refine_factor_without_exact_is_valid() {
+        let mut req = req_vector_only();
+        req.refine_factor = Some(5);
+        assert!(validate_exact_query_request(&req).is_ok());
     }
 
     #[test]
