@@ -1,0 +1,32 @@
+[
+  {
+    "build": 1,
+    "nprobes": 20,
+    "recall@10": 0.592,
+    "queries": 200,
+    "p50_ms": 3.41,
+    "p95_ms": 4.4,
+    "p99_ms": 7.5,
+    "cache_hits": 0
+  },
+  {
+    "build": 2,
+    "nprobes": 20,
+    "recall@10": 0.595,
+    "queries": 200,
+    "p50_ms": 3.31,
+    "p95_ms": 3.55,
+    "p99_ms": 4.29,
+    "cache_hits": 0
+  },
+  {
+    "build": 3,
+    "nprobes": 20,
+    "recall@10": 0.587,
+    "queries": 200,
+    "p50_ms": 3.33,
+    "p95_ms": 3.89,
+    "p99_ms": 5.09,
+    "cache_hits": 0
+  }
+]

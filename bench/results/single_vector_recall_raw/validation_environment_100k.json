@@ -1,0 +1,165 @@
+{
+  "run": {
+    "start_utc": "2026-09-01T20:49:36Z",
+    "stop_utc": "2026-09-01T20:58:39Z",
+    "operator": "Firn maintainer validation",
+    "pr": 112,
+    "pr_head_before_validation": "a06ddb2cf9a6203dd40a1f1a6de8657e9c695f05"
+  },
+  "server": {
+    "version": "0.9.5",
+    "image": "ghcr.io/gordonmurray/firnflow@sha256:4c2b7a58df687423cc1db9b83a541c4b776fefa63d3a73a05850c34173416e19",
+    "storage": "MinIO on loopback through an isolated Docker network",
+    "minio_image": "minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+    "mc_image": "minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727"
+  },
+  "dataset": {
+    "repository": "CohereLabs/wikipedia-2023-11-embed-multilingual-v3",
+    "revision": "ade45fb52bd549f5e8c065636fe4160a43c2af36",
+    "corpus_shard": {
+      "path": "en/0000.parquet",
+      "rows": 100000,
+      "sha256": "2c6abfffa7dd336113251b3e6f3fe4ee16688ead7c67b99593cbadc5589e28b3"
+    },
+    "query_shard": {
+      "path": "en/0010.parquet",
+      "queries_used": 200,
+      "sha256": "e46f909cfc63ac7f7e62b6394f8026fd450ee5aff01a2fdbb9f8e187dbb8e39a"
+    },
+    "truth_200_sha256": "6827a0ae543447967109b2b4e4ad7fd735448d94b4bf357002b0838b2e0d0d14",
+    "truth_20_sha256": "b471b10d75aeef9452a10015d1bde0b6bcfcf040ddd341254b33b4f17c8d2d41"
+  },
+  "namespace": {
+    "name": "pr112-100k",
+    "kind": "single",
+    "vector_dim": 1024,
+    "row_count": 100000,
+    "fragment_count": 1,
+    "before_index": {
+      "has_vector_index": false,
+      "table_version": 2
+    },
+    "builds": [
+      {
+        "build": 1,
+        "has_vector_index": true,
+        "table_version": 3
+      },
+      {
+        "build": 2,
+        "has_vector_index": true,
+        "table_version": 4
+      },
+      {
+        "build": 3,
+        "has_vector_index": true,
+        "table_version": 5
+      }
+    ]
+  },
+  "index": {
+    "request": {
+      "kind": "ivf_pq"
+    },
+    "distance_metric": {
+      "value": "L2",
+      "evidence": "Firn single-vector index path"
+    },
+    "num_partitions": {
+      "value": 12,
+      "evidence": "LanceDB 0.29 and Lance 6 source default for 100000 rows"
+    },
+    "num_sub_vectors": {
+      "value": 64,
+      "evidence": "LanceDB 0.29 source default for dimension 1024"
+    },
+    "num_bits": {
+      "value": 8,
+      "evidence": "Lance 6 source default"
+    },
+    "coverage": {
+      "indexed_rows": 100000,
+      "unindexed_rows": 0,
+      "evidence": "lancedb 0.29.0 index_stats against the built table"
+    },
+    "inspection": {
+      "client": "lancedb 0.29.0",
+      "index_name": "vector_idx",
+      "index_type": "IVF_PQ",
+      "distance_type": "l2",
+      "num_indexed_rows": 100000,
+      "num_unindexed_rows": 0,
+      "num_indices": 1,
+      "loss": 70624.08280915022
+    }
+  },
+  "queries": {
+    "k": 10,
+    "indexed_query_count": 200,
+    "flat_control_query_count": 20,
+    "include_vector": false,
+    "nprobes": [
+      1,
+      2,
+      5,
+      10,
+      20,
+      50,
+      100,
+      316,
+      1000
+    ],
+    "measured_result_cache_hits": 0
+  },
+  "cache": {
+    "object_cache_enabled": true,
+    "object_cache_bytes": 4294967296,
+    "exact_cache_memory_bytes": 67108864,
+    "exact_cache_nvme_bytes": 268435456,
+    "final_object_cache_counters": {
+      "hits": 29592,
+      "misses": 6220,
+      "inner_gets": 6233,
+      "evictions": 0
+    },
+    "final_exact_cache_counters": {
+      "hits": 9,
+      "misses": 4440
+    },
+    "final_exact_cache_hits_include_probe_ids_after_the_measured_sweep": true
+  },
+  "environment": {
+    "os": "Ubuntu 26.04 LTS",
+    "kernel": "Linux 7.0.0-30-generic x86_64",
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13700H",
+    "logical_cpus": 20,
+    "memory_bytes": 15879614464,
+    "docker_client": "29.7.2",
+    "docker_server": "29.7.2",
+    "python": "3.14.4",
+    "packages": {
+      "certifi": "2026.7.22",
+      "charset-normalizer": "3.5.1",
+      "idna": "3.19",
+      "numpy": "2.5.2",
+      "pyarrow": "25.0.1",
+      "requests": "2.34.2",
+      "urllib3": "2.7.0"
+    }
+  },
+  "harness_sha256": {
+    "corpus.py": "a4bc6a044df309560bbe719568dca504a40d7bcc5c4d7ef5a467f12003252f73",
+    "ground_truth.py": "a9a6a748926fc11cdfde7ffd3f3bc77842d8e72ef9d101e7ed653ce16d147c00",
+    "recall_sweep.py": "30815b9d4cbdd61a189aa94e766e27e4fdec399917b162ead38dca851fd53553",
+    "rebuild_index.py": "a1c65ed595f02a1ba0d5a5837cc7fec4c52cd47d1a3b805c8d3f3cd5fa748f9b",
+    "seed_namespace.py": "5caf56cddff72bff975a6d6de47610447f30f5c00a2d73ca4acaf2995df3f29e",
+    "probe_ids.py": "4109d423218b9836d7ca77ea414a3777191b82947e56c6bc1e4938fe451b0bbe",
+    "requirements.txt": "de97d4a7aeb760c32341c8198a7493f65c0270b8c737381cc48af1edd5a89333"
+  },
+  "results_sha256": {
+    "flat_scan_100k_validation.json": "bec025fdfb16c2f8dfb2fb9e44b7227e41cca72aca7593b934d45d3c063b5223",
+    "build_repeat_100k_validation.json": "7ee3c6f88fa59da477eb6732b92290c151c7a270ce820cbcf997a2b8045857ae",
+    "nprobes_exhaustive_100k_validation.json": "a0cc94a8ad060cd017e58533acb363706cab36f899adc7371e9bedd53eeed462",
+    "query0_ids_by_nprobes_100k_validation.json": "36190d3d455969769786199eb8f35ad8ecfd2cb23fc89e767d09cd7493eb10ba"
+  }
+}
