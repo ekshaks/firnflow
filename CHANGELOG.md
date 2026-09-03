@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-09-03
+
 ### Added
 - `POST /ns/{namespace}/query` accepts `exact: true`, which bypasses the IVF_PQ vector index and scans all rows for exact nearest-neighbour results. The main use case is recall measurement: run the same query twice, once with `exact: true` as ground truth and once without, then compare the two result sets to compute recall@k. Works for vector-only and hybrid queries; FTS-only queries with `exact: true` return 400. Setting `exact: true` alongside `nprobes` also returns 400, since the two fields describe different execution plans. Exact queries always run against the backend and bypass both result caches (the exact cache and the semantic sidecar), so each call produces a fresh brute-force result. Closes #113.
 - The Python package `search()` call gains an `exact` keyword argument (`exact=True`/`False`, default `False`). Same constraints as the REST field: vector-only queries only, raises `ValidationError` when combined with `nprobes`, multivectors, or a text query. Ships as `firn 0.2.2`.
@@ -255,7 +257,8 @@ development through phases 1 through 8 before being made public;
   benchmark at dim=1536, 100k rows available at
   `bench/results/cold_vs_warm_aws.md`.
 
-[Unreleased]: https://github.com/gordonmurray/firnflow/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/gordonmurray/firnflow/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/gordonmurray/firnflow/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/gordonmurray/firnflow/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/gordonmurray/firnflow/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/gordonmurray/firnflow/compare/v0.9.2...v0.9.3
