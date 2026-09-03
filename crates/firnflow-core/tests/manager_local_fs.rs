@@ -53,7 +53,7 @@ async fn local_fs_upsert_query_roundtrip() {
     );
 
     let results = manager
-        .query(&ns, unit_vector(0), None, 3, None, None, None, true)
+        .query(&ns, unit_vector(0), None, 3, None, None, None, true, false)
         .await
         .expect("local query");
 
@@ -121,6 +121,7 @@ async fn local_fs_fts_text_search() {
             Some("fox".into()),
             None,
             false,
+            false,
         )
         .await
         .expect("fts query");
@@ -158,6 +159,7 @@ async fn local_fs_query_filter_narrows_vector_results() {
             None,
             Some("id > 1".into()),
             false,
+            false,
         )
         .await
         .expect("filtered vector query");
@@ -176,7 +178,7 @@ async fn local_fs_query_filter_accepts_ingested_at_ranges() {
     manager.upsert(&ns, rows).await.expect("local upsert");
 
     let all = manager
-        .query(&ns, unit_vector(0), None, 2, None, None, None, false)
+        .query(&ns, unit_vector(0), None, 2, None, None, None, false, false)
         .await
         .expect("unfiltered query");
     let cutoff = all.results[0]
@@ -192,6 +194,7 @@ async fn local_fs_query_filter_accepts_ingested_at_ranges() {
             None,
             None,
             Some(format!("_ingested_at >= to_timestamp_micros({cutoff})")),
+            false,
             false,
         )
         .await
@@ -244,6 +247,7 @@ async fn local_fs_query_filter_narrows_fts_and_hybrid_results() {
             Some("fox".into()),
             Some("id = 2".into()),
             false,
+            false,
         )
         .await
         .expect("filtered fts query");
@@ -259,6 +263,7 @@ async fn local_fs_query_filter_narrows_fts_and_hybrid_results() {
             None,
             Some("fox".into()),
             Some("id = 2".into()),
+            false,
             false,
         )
         .await
@@ -286,6 +291,7 @@ async fn local_fs_query_filter_zero_match_and_malformed_predicate() {
             None,
             Some("id > 99".into()),
             false,
+            false,
         )
         .await
         .expect("zero-match filtered query");
@@ -300,6 +306,7 @@ async fn local_fs_query_filter_zero_match_and_malformed_predicate() {
             None,
             None,
             Some("id =".into()),
+            false,
             false,
         )
         .await
@@ -382,6 +389,7 @@ async fn local_fs_text_query_without_fts_index_is_a_bad_request() {
             Some("fox".into()),
             None,
             false,
+            false,
         )
         .await
         .expect_err("FTS-only without an index must fail");
@@ -398,6 +406,7 @@ async fn local_fs_text_query_without_fts_index_is_a_bad_request() {
             None,
             Some("fox".into()),
             None,
+            false,
             false,
         )
         .await
@@ -417,6 +426,7 @@ async fn local_fs_text_query_without_fts_index_is_a_bad_request() {
             Some("fox".into()),
             Some("id > 0".into()),
             false,
+            false,
         )
         .await
         .expect_err("filtered FTS without an index must fail");
@@ -425,7 +435,17 @@ async fn local_fs_text_query_without_fts_index_is_a_bad_request() {
     // Vector-only is unaffected. The probe must not fire on a query
     // that carries no text.
     let results = manager
-        .query(&ns, unit_vector(0), None, 10, None, None, None, false)
+        .query(
+            &ns,
+            unit_vector(0),
+            None,
+            10,
+            None,
+            None,
+            None,
+            false,
+            false,
+        )
         .await
         .expect("vector-only query must still succeed without an FTS index");
     assert_eq!(
@@ -449,6 +469,7 @@ async fn local_fs_text_query_without_fts_index_is_a_bad_request() {
             None,
             Some("fox".into()),
             None,
+            false,
             false,
         )
         .await
@@ -476,7 +497,7 @@ async fn local_fs_text_query_on_unwritten_namespace_is_empty_not_an_error() {
         ("vector-only", unit_vector(0), None),
     ] {
         let results = manager
-            .query(&ns, vector, None, 10, None, text, None, false)
+            .query(&ns, vector, None, 10, None, text, None, false, false)
             .await
             .unwrap_or_else(|e| panic!("{case} on an unwritten namespace must not error: {e}"));
         assert!(
@@ -539,6 +560,7 @@ async fn local_fs_fts_index_covers_rows_written_after_the_build() {
             None,
             Some("aardvark".into()),
             None,
+            false,
             false,
         )
         .await

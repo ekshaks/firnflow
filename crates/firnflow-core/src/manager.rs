@@ -1240,6 +1240,12 @@ impl NamespaceManager {
     /// LanceDB's prefilter (`only_if`) before vector ranking or FTS
     /// scoring. Malformed predicates are reported as
     /// [`FirnflowError::InvalidRequest`].
+    ///
+    /// `exact: true` bypasses the IVF_PQ vector index and scans all
+    /// rows for exact nearest-neighbour results. Useful for recall
+    /// measurement. Callers are expected to have validated that
+    /// `exact` is not combined with `nprobes` or an empty vector
+    /// before reaching this method.
     #[allow(clippy::too_many_arguments)]
     pub async fn query(
         &self,
@@ -1251,6 +1257,7 @@ impl NamespaceManager {
         text: Option<String>,
         filter: Option<String>,
         include_vector: bool,
+        exact: bool,
     ) -> Result<QueryResultSet, FirnflowError> {
         let info = match self.resolve_schema_info(ns).await? {
             Some(info) => info,
@@ -1388,7 +1395,12 @@ impl NamespaceManager {
                     vq
                 }
             };
-            vq = vq.nprobes(nprobes).limit(k);
+            if exact {
+                vq = vq.bypass_vector_index();
+            } else {
+                vq = vq.nprobes(nprobes);
+            }
+            vq = vq.limit(k);
             if let Some(ref t) = text {
                 vq = vq.full_text_search(FullTextSearchQuery::new(t.clone()));
             }

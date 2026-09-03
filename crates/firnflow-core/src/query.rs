@@ -86,6 +86,22 @@ pub struct QueryRequest {
     /// does not split otherwise-identical entries.
     #[serde(default)]
     pub semantic_cache: Option<SemanticCacheRequest>,
+    /// When `true`, bypass the IVF_PQ vector index and scan all rows
+    /// for exact nearest-neighbour results. Useful for recall
+    /// measurement: run the same query twice — once with `exact: true`
+    /// as the ground truth and once without — then compare the two
+    /// result sets to compute recall@k.
+    ///
+    /// Constraints: `exact: true` with `nprobes` set returns 400
+    /// (the two knobs describe different execution plans). `exact: true`
+    /// on a query with no vector field returns 400 (there is no vector
+    /// index to bypass). `exact` queries bypass both caches and always
+    /// run against the backend.
+    ///
+    /// Participates in the exact-cache key so that exact and indexed
+    /// results for the same query do not collide.
+    #[serde(default)]
+    pub exact: bool,
 }
 
 /// Per-request controls for opt-in semantic caching.
@@ -172,6 +188,39 @@ pub fn validate_semantic_cache_request(req: &QueryRequest) -> Result<(), crate::
     if req.filter.is_some() {
         return Err(crate::FirnflowError::InvalidRequest(
             "semantic_cache is not supported for filtered queries in v1".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validate the `exact` field carried by a [`QueryRequest`].
+///
+/// Pure: no I/O. Called from `NamespaceService::query` before any
+/// cache or backend work so a bad payload returns 400 immediately.
+///
+/// Checks:
+/// - `exact: true` with `nprobes` set returns 400. The two knobs
+///   describe different execution plans and cannot be combined.
+/// - `exact: true` with no vector field returns 400. FTS-only queries
+///   have no vector index to bypass; use a plain FTS query instead.
+pub fn validate_exact_query_request(req: &QueryRequest) -> Result<(), crate::FirnflowError> {
+    if !req.exact {
+        return Ok(());
+    }
+    if req.nprobes.is_some() {
+        return Err(crate::FirnflowError::InvalidRequest(
+            "`exact: true` and `nprobes` cannot be set together; \
+             they describe different execution plans"
+                .into(),
+        ));
+    }
+    let has_vector = !req.vector.is_empty();
+    let has_vectors = req.vectors.as_ref().is_some_and(|v| !v.is_empty());
+    if !has_vector && !has_vectors {
+        return Err(crate::FirnflowError::InvalidRequest(
+            "`exact: true` requires a vector or vectors field; \
+             FTS-only queries have no vector index to bypass"
+                .into(),
         ));
     }
     Ok(())
@@ -304,6 +353,7 @@ mod tests {
             filter: None,
             include_vector: true,
             semantic_cache: None,
+            exact: false,
         }
     }
 
@@ -418,5 +468,46 @@ mod tests {
             }
             other => panic!("expected InvalidRequest, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn exact_false_is_always_valid() {
+        let req = req_vector_only();
+        assert!(validate_exact_query_request(&req).is_ok());
+    }
+
+    #[test]
+    fn exact_with_nprobes_is_rejected() {
+        let mut req = req_vector_only();
+        req.exact = true;
+        req.nprobes = Some(10);
+        let err = validate_exact_query_request(&req).unwrap_err();
+        match err {
+            FirnflowError::InvalidRequest(msg) => {
+                assert!(msg.contains("nprobes"), "{msg}");
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn exact_without_vector_is_rejected() {
+        let mut req = req_vector_only();
+        req.exact = true;
+        req.vector.clear();
+        let err = validate_exact_query_request(&req).unwrap_err();
+        match err {
+            FirnflowError::InvalidRequest(msg) => {
+                assert!(msg.contains("vector") || msg.contains("FTS"), "{msg}");
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn exact_with_vector_no_nprobes_is_valid() {
+        let mut req = req_vector_only();
+        req.exact = true;
+        assert!(validate_exact_query_request(&req).is_ok());
     }
 }
