@@ -309,6 +309,7 @@ impl NamespaceService {
             .filter(|s| s.enabled && !req.exact);
         let nprobes_resolved = req.nprobes.unwrap_or(DEFAULT_NPROBES);
         let semantic_eligible = semantic_opt.is_some()
+            && !req.exact
             && !req.vector.is_empty()
             && req.vectors.as_ref().is_none_or(|v| v.is_empty())
             && req.text.is_none()
@@ -594,8 +595,10 @@ pub fn hash_query_for_cache(req: &QueryRequest) -> Result<QueryHash, FirnflowErr
         // and a vector-light result set are different payloads and
         // must not collide on the same entry.
         include_vector: bool,
-        // Exact and indexed results for the same query are different
-        // payloads and must not collide.
+        // Included for forward-compatibility: exact queries currently
+        // bypass the cache entirely, so this field is never part of a
+        // live lookup. If exact queries are ever cached, the two result
+        // sets must not collide on the same key.
         exact: bool,
     }
     let canonical = Canonical {
@@ -657,6 +660,15 @@ mod tests {
             semantic_cache: None,
             exact: false,
         }
+    }
+
+    #[test]
+    fn exact_changes_cache_key() {
+        let base = hash_query_for_cache(&req_with_filter(None)).unwrap();
+        let mut exact_req = req_with_filter(None);
+        exact_req.exact = true;
+        let with_exact = hash_query_for_cache(&exact_req).unwrap();
+        assert_ne!(base, with_exact);
     }
 
     #[test]

@@ -92,14 +92,15 @@ pub struct QueryRequest {
     /// as the ground truth and once without — then compare the two
     /// result sets to compute recall@k.
     ///
-    /// Constraints: `exact: true` with `nprobes` set returns 400
-    /// (the two knobs describe different execution plans). `exact: true`
-    /// on a query with no vector field returns 400 (there is no vector
-    /// index to bypass). `exact` queries bypass both caches and always
-    /// run against the backend.
+    /// Restricted to single-vector queries in v1 (no `vectors`, no
+    /// `text`). Setting `exact: true` with `nprobes`, on a multivector
+    /// query, or on a hybrid query all return 400. Exact queries always
+    /// run against the backend — both caches are bypassed in both
+    /// directions.
     ///
-    /// Participates in the exact-cache key so that exact and indexed
-    /// results for the same query do not collide.
+    /// Participates in the exact-cache key for forward-compatibility
+    /// (exact queries currently bypass the cache entirely, but the key
+    /// must differ from the indexed version if caching is ever added).
     #[serde(default)]
     pub exact: bool,
 }
@@ -203,6 +204,14 @@ pub fn validate_semantic_cache_request(req: &QueryRequest) -> Result<(), crate::
 ///   describe different execution plans and cannot be combined.
 /// - `exact: true` with no vector field returns 400. FTS-only queries
 ///   have no vector index to bypass; use a plain FTS query instead.
+/// - `exact: true` on a multivector query returns 400. Whether
+///   `bypass_vector_index()` is defined for the `List<FixedSizeList>`
+///   MaxSim plan in lancedb 0.29 is undocumented; v1 restricts `exact`
+///   to single-vector queries rather than risk a backend 500.
+/// - `exact: true` on a hybrid query (vector + text) returns 400.
+///   The interaction between brute-force vector scoring and BM25 under
+///   RRF fusion is undefined; v1 restricts `exact` to vector-only
+///   queries.
 pub fn validate_exact_query_request(req: &QueryRequest) -> Result<(), crate::FirnflowError> {
     if !req.exact {
         return Ok(());
@@ -220,6 +229,20 @@ pub fn validate_exact_query_request(req: &QueryRequest) -> Result<(), crate::Fir
         return Err(crate::FirnflowError::InvalidRequest(
             "`exact: true` requires a vector or vectors field; \
              FTS-only queries have no vector index to bypass"
+                .into(),
+        ));
+    }
+    if has_vectors {
+        return Err(crate::FirnflowError::InvalidRequest(
+            "`exact: true` is not supported for multivector queries in v1; \
+             use a single-vector namespace for recall measurement"
+                .into(),
+        ));
+    }
+    if req.text.is_some() {
+        return Err(crate::FirnflowError::InvalidRequest(
+            "`exact: true` is not supported for hybrid queries in v1; \
+             omit the `text` field to measure vector recall alone"
                 .into(),
         ));
     }
@@ -509,5 +532,34 @@ mod tests {
         let mut req = req_vector_only();
         req.exact = true;
         assert!(validate_exact_query_request(&req).is_ok());
+    }
+
+    #[test]
+    fn exact_with_multivector_is_rejected() {
+        let mut req = req_vector_only();
+        req.exact = true;
+        req.vector.clear();
+        req.vectors = Some(vec![vec![0.1, 0.2]]);
+        let err = validate_exact_query_request(&req).unwrap_err();
+        match err {
+            FirnflowError::InvalidRequest(msg) => {
+                assert!(msg.contains("multivector"), "{msg}");
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn exact_with_hybrid_is_rejected() {
+        let mut req = req_vector_only();
+        req.exact = true;
+        req.text = Some("hello".into());
+        let err = validate_exact_query_request(&req).unwrap_err();
+        match err {
+            FirnflowError::InvalidRequest(msg) => {
+                assert!(msg.contains("hybrid"), "{msg}");
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
     }
 }
