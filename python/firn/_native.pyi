@@ -31,6 +31,7 @@ class Collection:
         tenant: Optional[str] = None,
         filter: Optional[str] = None,
         include_vectors: bool = False,
+        exact: bool = False,
     ) -> list[Hit]: ...
 
 class Client:
@@ -53,6 +54,7 @@ class Client:
         tenant: Optional[str] = None,
         filter: Optional[str] = None,
         include_vectors: bool = False,
+        exact: bool = False,
     ) -> list[Hit]: ...
     def close(self) -> None: ...
     def __enter__(self) -> "Client": ...
