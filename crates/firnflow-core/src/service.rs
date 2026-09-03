@@ -310,6 +310,10 @@ impl NamespaceService {
         let nprobes_resolved = req.nprobes.unwrap_or(DEFAULT_NPROBES);
         let semantic_eligible = semantic_opt.is_some()
             && !req.exact
+            // A sidecar entry records k / nprobes / include_vector but
+            // not the rerank factor, so a reranked request must not be
+            // answered from an unreranked neighbour's bytes.
+            && req.refine_factor.is_none()
             && !req.vector.is_empty()
             && req.vectors.as_ref().is_none_or(|v| v.is_empty())
             && req.text.is_none()
@@ -383,6 +387,7 @@ impl NamespaceService {
                 req.vectors.clone(),
                 req.k,
                 req.nprobes,
+                req.refine_factor,
                 req.text.clone(),
                 req.filter.clone(),
                 req.include_vector,
@@ -589,6 +594,9 @@ pub fn hash_query_for_cache(req: &QueryRequest) -> Result<QueryHash, FirnflowErr
         vectors: &'a Option<Vec<Vec<f32>>>,
         k: usize,
         nprobes: Option<usize>,
+        // In the key for the same reason as `include_vector`: a
+        // reranked and an unreranked top-k are different result sets.
+        refine_factor: Option<u32>,
         text: &'a Option<String>,
         filter: &'a Option<String>,
         // Deliberately in the key, unlike `semantic_cache`: a full
@@ -606,6 +614,7 @@ pub fn hash_query_for_cache(req: &QueryRequest) -> Result<QueryHash, FirnflowErr
         vectors: &req.vectors,
         k: req.k,
         nprobes: req.nprobes,
+        refine_factor: req.refine_factor,
         text: &req.text,
         filter: &req.filter,
         include_vector: req.include_vector,
@@ -654,6 +663,7 @@ mod tests {
             vectors: None,
             k: 10,
             nprobes: None,
+            refine_factor: None,
             text: None,
             filter: filter.map(str::to_string),
             include_vector: true,

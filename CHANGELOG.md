@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `/query` accepts an optional `refine_factor` integer that turns on a full-precision rerank. An IVF_PQ index stores a product-quantised sketch of every vector (64 bytes standing in for 4,096 at dim=1024) and ranks by distance to the sketch, so its top-k is the quantiser's guess at the answer, and probing more partitions cannot fix what the scoring step loses: the single-vector recall harness (`bench/recall/`) measured recall@10 between 0.587 and 0.612 across index builds of a 100k-row namespace whose 12 partitions the default `nprobes` of 20 already scans in full, and raising `nprobes` to 100 on one of those builds moved it by less than 0.001. With `refine_factor: n`, Lance retrieves `n × k` candidates by sketch distance, re-scores them against the stored full-precision vectors, and returns the true top `k` of that pool, at the cost of reading those candidates' vectors from storage: on the 0.612 build, `refine_factor: 5` scored 0.943 and `refine_factor: 10` scored 0.983, with median query time rising from 3.1 ms to 4.7 ms and 6.1 ms over 200 held-out queries. `refine_factor: 1` is accepted and changes nothing, because a pool of exactly `k` rows cannot be reordered into a different `k` rows. Omitting the field keeps the historical behaviour, so existing callers see byte-identical results; `0` is rejected with a 400 rather than handed to the engine as an empty candidate pool. Setting it alongside `exact: true` is also a 400, the same way `nprobes` is, because an exact query scans every row against the stored full-precision vectors and so has no quantised shortlist left to re-score. A reranked and an unreranked top-k over the same vector are different result sets, so the field is part of the exact result-cache key, and a request carrying it never consults the semantic sidecar, whose entries only record k / nprobes / include_vector. Applies to single-vector, multivector, and hybrid queries; FTS-only queries ignore it, the same way they ignore `nprobes`.
+
+### Known limitations
+- The embedded Python package does not expose `refine_factor`; queries through it are never reranked.
+
 ## [0.9.6] - 2026-09-03
 
 ### Added
