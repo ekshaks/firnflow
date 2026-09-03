@@ -39,6 +39,7 @@ fn request(filter: Option<&str>) -> QueryRequest {
         filter: filter.map(str::to_string),
         include_vector: false,
         semantic_cache: None,
+        exact: false,
     }
 }
 

@@ -2614,7 +2614,7 @@ dependencies = [
 
 [[package]]
 name = "firnflow-python"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "firnflow-core",
  "pyo3",

@@ -391,6 +391,7 @@ fn op_search(
     limit: usize,
     filter: Option<String>,
     include_vectors: bool,
+    exact: bool,
 ) -> PyResult<Vec<Hit>> {
     // An empty list is "no payload", not an empty vector — otherwise a
     // `vector=[]` would slip past the hybrid guard and silently degrade
@@ -423,6 +424,7 @@ fn op_search(
         filter,
         include_vector: include_vectors,
         semantic_cache: None,
+        exact,
     };
     let service = service.clone();
     let fts = fts.clone();
@@ -510,7 +512,7 @@ impl Collection {
     }
 
     /// Search this collection. See `Client.search`.
-    #[pyo3(signature = (query=None, *, vector=None, vectors=None, hybrid=false, limit=10, tenant=None, filter=None, include_vectors=false))]
+    #[pyo3(signature = (query=None, *, vector=None, vectors=None, hybrid=false, limit=10, tenant=None, filter=None, include_vectors=false, exact=false))]
     #[allow(clippy::too_many_arguments)]
     fn search(
         &self,
@@ -523,6 +525,7 @@ impl Collection {
         tenant: Option<String>,
         filter: Option<String>,
         include_vectors: bool,
+        exact: bool,
     ) -> PyResult<Vec<Hit>> {
         self.lifecycle.check_open()?;
         let ns = compose_namespace(&self.collection, tenant.as_deref())?;
@@ -539,6 +542,7 @@ impl Collection {
             limit,
             filter,
             include_vectors,
+            exact,
         )
     }
 }
@@ -627,7 +631,7 @@ impl Client {
     /// nearest-neighbour search; supplying both (or `hybrid=True`) runs
     /// hybrid (RRF) search. `tenant=` scopes to one tenant's namespace.
     /// Vectors are not echoed back on hits unless `include_vectors=True`.
-    #[pyo3(signature = (query=None, *, vector=None, vectors=None, hybrid=false, limit=10, tenant=None, filter=None, include_vectors=false))]
+    #[pyo3(signature = (query=None, *, vector=None, vectors=None, hybrid=false, limit=10, tenant=None, filter=None, include_vectors=false, exact=false))]
     #[allow(clippy::too_many_arguments)]
     fn search(
         &self,
@@ -640,6 +644,7 @@ impl Client {
         tenant: Option<String>,
         filter: Option<String>,
         include_vectors: bool,
+        exact: bool,
     ) -> PyResult<Vec<Hit>> {
         self.lifecycle.check_open()?;
         let ns = compose_namespace(DEFAULT_COLLECTION, tenant.as_deref())?;
@@ -656,6 +661,7 @@ impl Client {
             limit,
             filter,
             include_vectors,
+            exact,
         )
     }
 

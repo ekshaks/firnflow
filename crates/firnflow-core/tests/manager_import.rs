@@ -248,7 +248,7 @@ async fn import_carries_declared_attribute_values() {
     assert_eq!(imported, 2);
 
     let by_id: HashMap<u64, _> = mgr
-        .query(&ns, unit_vector(0), None, 10, None, None, None, true)
+        .query(&ns, unit_vector(0), None, 10, None, None, None, true, false)
         .await
         .expect("query")
         .results
@@ -297,6 +297,7 @@ async fn import_carries_declared_attribute_values() {
             None,
             Some("section = 'dosage'".into()),
             true,
+            false,
         )
         .await
         .expect("filtered query")
@@ -386,7 +387,7 @@ async fn import_single_vector_is_queryable() {
     let mut q = vec![0.0_f32; DIM];
     q[0] = 1.0;
     let results = mgr
-        .query(&ns, q, None, 10, None, None, None, true)
+        .query(&ns, q, None, 10, None, None, None, true, false)
         .await
         .expect("query")
         .results;

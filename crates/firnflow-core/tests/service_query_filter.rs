@@ -32,6 +32,7 @@ fn request(filter: Option<&str>) -> QueryRequest {
         filter: filter.map(str::to_string),
         include_vector: false,
         semantic_cache: None,
+        exact: false,
     }
 }
 
@@ -138,6 +139,7 @@ async fn filtered_fts_without_index_maps_to_invalid_request() {
         filter: Some("id > 1".into()),
         include_vector: false,
         semantic_cache: None,
+        exact: false,
     };
     let err = service
         .query_with_cache_source(&ns, &req)

@@ -389,6 +389,7 @@ fn vector_query(
             enabled: true,
             min_similarity: Some(threshold),
         }),
+        exact: false,
     }
 }
 
@@ -419,7 +420,17 @@ async fn true_query(
     cfg: &BenchConfig,
 ) -> anyhow::Result<QueryResultSet> {
     manager
-        .query(ns, vector, None, cfg.k, Some(cfg.nprobes), None, None, true)
+        .query(
+            ns,
+            vector,
+            None,
+            cfg.k,
+            Some(cfg.nprobes),
+            None,
+            None,
+            true,
+            false,
+        )
         .await
         .map_err(|e| anyhow::anyhow!("manager query: {e}"))
 }

@@ -28,7 +28,8 @@ use crate::filter::{FilterCacheability, classify_filter};
 use crate::manager::{CompactResult, NamespaceManager, UpsertRow};
 use crate::metrics::CoreMetrics;
 use crate::query::{
-    DEFAULT_NPROBES, QueryRequest, effective_semantic_threshold, validate_semantic_cache_request,
+    DEFAULT_NPROBES, QueryRequest, effective_semantic_threshold, validate_exact_query_request,
+    validate_semantic_cache_request,
 };
 use crate::{FirnflowError, NamespaceId, QueryResultSet};
 
@@ -230,6 +231,7 @@ impl NamespaceService {
     ) -> Result<QueryOutcome, FirnflowError> {
         let start = Instant::now();
         validate_semantic_cache_request(req)?;
+        validate_exact_query_request(req)?;
 
         let query_hash = hash_query_for_cache(req)?;
 
@@ -256,9 +258,10 @@ impl NamespaceService {
             Some(f) => self.filter_is_cacheable(ns, f).await?,
         };
 
-        // 1. Exact cache — always consulted, opt-in or not. A payload
-        //    that fails to decode is treated as a miss, not an error:
-        //    the NVMe tier survives restarts, so after an upgrade that
+        // 1. Exact cache — consulted unless the request asks for exact
+        //    (brute-force) results or carries a non-immutable filter.
+        //    A payload that fails to decode is treated as a miss: the
+        //    NVMe tier survives restarts, so after an upgrade that
         //    changes the result wire format a recovered entry can hit
         //    at the same key with bytes this build cannot read. The
         //    fall-through re-runs the query and repopulates the entry
@@ -268,7 +271,7 @@ impl NamespaceService {
         //    a miss: it never consults the cache, so counting it
         //    either way would distort the hit rate rather than
         //    describe it.
-        let (exact_hit, captured_generation) = if exact_cacheable {
+        let (exact_hit, captured_generation) = if exact_cacheable && !req.exact {
             self.cache.try_get(ns, query_hash).await
         } else {
             (None, generation)
@@ -297,10 +300,16 @@ impl NamespaceService {
             }
         }
 
-        // 2. Semantic sidecar — only when opt-in and eligible.
-        let semantic_opt = req.semantic_cache.as_ref().filter(|s| s.enabled);
+        // 2. Semantic sidecar — only when opt-in, eligible, and not
+        //    an exact query. Exact queries always run against the
+        //    backend to serve as ground-truth for recall measurement.
+        let semantic_opt = req
+            .semantic_cache
+            .as_ref()
+            .filter(|s| s.enabled && !req.exact);
         let nprobes_resolved = req.nprobes.unwrap_or(DEFAULT_NPROBES);
         let semantic_eligible = semantic_opt.is_some()
+            && !req.exact
             && !req.vector.is_empty()
             && req.vectors.as_ref().is_none_or(|v| v.is_empty())
             && req.text.is_none()
@@ -377,22 +386,19 @@ impl NamespaceService {
                 req.text.clone(),
                 req.filter.clone(),
                 req.include_vector,
+                req.exact,
             )
             .await?;
         let bytes = encode_payload(&result)?;
-        if exact_cacheable {
+        if exact_cacheable && !req.exact {
             self.cache
                 .populate_with_generation(ns, captured_generation, query_hash, bytes.clone());
         }
-        // Deliberately not gated on `exact_cacheable`: the sidecar
-        // never sees a filtered request at all. `semantic_eligible`
-        // requires `req.filter.is_none()`, and a filtered request
-        // that opts in is rejected outright by
-        // `validate_semantic_cache_request` at the top of this
-        // function. So there is no filtered path into the sidecar for
-        // the cacheability check to guard. Should the sidecar ever
-        // support filters, this needs the same gate as the exact
-        // cache above.
+        // The sidecar insert is gated on `semantic_eligible` (which
+        // already excludes filtered and exact requests — `semantic_opt`
+        // above filters out `req.exact`). Should the sidecar ever
+        // support filters, this needs the same `exact_cacheable` gate
+        // as the exact cache above.
         if semantic_eligible {
             self.semantic.insert(
                 ns,
@@ -589,6 +595,11 @@ pub fn hash_query_for_cache(req: &QueryRequest) -> Result<QueryHash, FirnflowErr
         // and a vector-light result set are different payloads and
         // must not collide on the same entry.
         include_vector: bool,
+        // Included for forward-compatibility: exact queries currently
+        // bypass the cache entirely, so this field is never part of a
+        // live lookup. If exact queries are ever cached, the two result
+        // sets must not collide on the same key.
+        exact: bool,
     }
     let canonical = Canonical {
         vector: &req.vector,
@@ -598,6 +609,7 @@ pub fn hash_query_for_cache(req: &QueryRequest) -> Result<QueryHash, FirnflowErr
         text: &req.text,
         filter: &req.filter,
         include_vector: req.include_vector,
+        exact: req.exact,
     };
     let bytes = bincode::serde::encode_to_vec(&canonical, config::standard())
         .map_err(|e| FirnflowError::Backend(format!("encode query: {e}")))?;
@@ -646,7 +658,17 @@ mod tests {
             filter: filter.map(str::to_string),
             include_vector: true,
             semantic_cache: None,
+            exact: false,
         }
+    }
+
+    #[test]
+    fn exact_changes_cache_key() {
+        let base = hash_query_for_cache(&req_with_filter(None)).unwrap();
+        let mut exact_req = req_with_filter(None);
+        exact_req.exact = true;
+        let with_exact = hash_query_for_cache(&exact_req).unwrap();
+        assert_ne!(base, with_exact);
     }
 
     #[test]
